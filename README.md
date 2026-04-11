@@ -2,7 +2,7 @@
 
 A sleek, cross-platform desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp) — paste a URL, pick a format, download. No terminal required.
 
-Built with Tauri v2 + Svelte 5 + TypeScript. Rust handles the download pipeline; the UI is plain CSS with full theme control (dark, light, and a hidden one 🦊).
+Built with Tauri v2 + Svelte 5 + TypeScript. Rust handles the download pipeline; the UI is plain CSS with full theme control (dark, light).
 
 > **Status:** early alpha (`0.1.x`). Things work; things are also missing. See [Roadmap](#roadmap).
 
@@ -115,4 +115,4 @@ TBD — will be set before the first tagged release. Contributions welcome once 
 
 ---
 
-<sub>Built with ❤️ — and a small fox hidden somewhere in the interface. Have fun finding it.</sub>
+<sub>Built with ❤️ </sub>
