@@ -1,0 +1,47 @@
+/* Hidden fox theme — unlocked via Konami code :3 */
+:root[data-theme='fox'] {
+  --bg: #1a0f08;
+  --surface: #241510;
+  --surface-2: #2e1c15;
+  --surface-3: #3d261d;
+  --border: #4a2f23;
+  --border-strong: #6b4332;
+
+  --fg: #fff5e6;
+  --fg-muted: #d4b79a;
+  --fg-dim: #997455;
+
+  --accent: #ff8c42;
+  --accent-strong: #ffa861;
+  --accent-muted: rgba(255, 140, 66, 0.2);
+  --accent-fg: #1a0f08;
+
+  --success: #c4d66a;
+  --warning: #ffc857;
+  --danger: #ff6b6b;
+
+  --shadow-sm: 0 1px 2px rgba(20, 8, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(255, 140, 66, 0.08);
+  --shadow-lg: 0 16px 48px rgba(20, 8, 0, 0.6);
+}
+
+/* Cute extras that only appear when the fox theme is active */
+:root[data-theme='fox'] .logo-glyph {
+  filter: drop-shadow(0 0 12px var(--accent-muted));
+  animation: tail-wag 3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes tail-wag {
+  0%,
+  100% {
+    transform: rotate(-2deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+:root[data-theme='fox'] .btn-primary::before {
+  content: '🦊 ';
+}

@@ -1,0 +1,36 @@
+[package]
+name = "vidfetch"
+version = "0.1.0"
+description = "A sleek yt-dlp GUI wrapper"
+authors = ["Ylias Roggeman"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "vidfetch_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-store = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+# tauri-plugin-updater deferred to v1.1 (requires signing keys + release channel)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+futures-util = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+anyhow = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+log = "0.4"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.58", features = ["Win32_System_Threading", "Win32_Foundation"] }
