@@ -16,7 +16,7 @@ dist-ssr/
 *.njsproj
 *.sln
 *.sw?
-.claude
+
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/schemas/
@@ -26,3 +26,4 @@ src-tauri/Cargo.lock
 .env
 .env.local
 .env.*.local
+/.claude
