@@ -25,6 +25,9 @@ pub fn run() {
             commands::ytdlp::install_ytdlp,
             commands::ytdlp::install_ffmpeg,
             commands::ytdlp::get_versions,
+            commands::probe::probe_url,
+            commands::download::start_download,
+            commands::download::cancel_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
