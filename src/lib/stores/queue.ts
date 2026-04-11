@@ -1,0 +1,254 @@
+import { writable, get, derived } from 'svelte/store';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { ipc } from '$lib/ipc';
+import type {
+  DownloadOptions,
+  DownloadProgressEvent,
+  DownloadStatusEvent,
+  DownloadStatusKind,
+  QualityPreset,
+  VideoInfo,
+} from '$lib/types';
+
+export type QueueItemStatus =
+  | 'queued'
+  | 'starting'
+  | 'downloading'
+  | 'postprocess'
+  | 'done'
+  | 'error'
+  | 'canceled';
+
+export interface QueueItem {
+  id: string;
+  rustId: string | null;
+  url: string;
+  preset: QualityPreset;
+  outputDir: string;
+  info: VideoInfo | null;
+  status: QueueItemStatus;
+  downloaded: number;
+  total: number | null;
+  speed: number | null;
+  eta: number | null;
+  message: string | null;
+  addedAt: number;
+}
+
+interface QueueState {
+  items: QueueItem[];
+  concurrency: number;
+}
+
+const initial: QueueState = {
+  items: [],
+  concurrency: 2,
+};
+
+export const queueStore = writable<QueueState>(initial);
+
+export const activeCount = derived(queueStore, ($q) =>
+  $q.items.filter(
+    (i) =>
+      i.status === 'queued' ||
+      i.status === 'starting' ||
+      i.status === 'downloading' ||
+      i.status === 'postprocess'
+  ).length
+);
+
+let listenersInstalled = false;
+let unlistenStatus: UnlistenFn | null = null;
+let unlistenProgress: UnlistenFn | null = null;
+
+function newId(): string {
+  return `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function mapStatus(s: DownloadStatusKind): QueueItemStatus {
+  return s;
+}
+
+export async function initQueue(): Promise<void> {
+  if (listenersInstalled) return;
+  listenersInstalled = true;
+
+  unlistenStatus = await listen<DownloadStatusEvent>('download://status', (e) => {
+    const payload = e.payload;
+    queueStore.update((s) => ({
+      ...s,
+      items: s.items.map((item) =>
+        item.rustId === payload.id
+          ? {
+              ...item,
+              status: mapStatus(payload.status),
+              message: payload.message ?? item.message,
+            }
+          : item
+      ),
+    }));
+    void tick();
+  });
+
+  unlistenProgress = await listen<DownloadProgressEvent>('download://progress', (e) => {
+    const payload = e.payload;
+    queueStore.update((s) => ({
+      ...s,
+      items: s.items.map((item) =>
+        item.rustId === payload.id
+          ? {
+              ...item,
+              downloaded: payload.downloaded,
+              total: payload.total,
+              speed: payload.speed,
+              eta: payload.eta,
+            }
+          : item
+      ),
+    }));
+  });
+}
+
+export async function disposeQueue(): Promise<void> {
+  if (unlistenStatus) {
+    unlistenStatus();
+    unlistenStatus = null;
+  }
+  if (unlistenProgress) {
+    unlistenProgress();
+    unlistenProgress = null;
+  }
+  listenersInstalled = false;
+}
+
+export function addToQueue(params: {
+  url: string;
+  preset: QualityPreset;
+  outputDir: string;
+  info: VideoInfo | null;
+}): string {
+  const item: QueueItem = {
+    id: newId(),
+    rustId: null,
+    url: params.url,
+    preset: params.preset,
+    outputDir: params.outputDir,
+    info: params.info,
+    status: 'queued',
+    downloaded: 0,
+    total: null,
+    speed: null,
+    eta: null,
+    message: null,
+    addedAt: Date.now(),
+  };
+  queueStore.update((s) => ({ ...s, items: [...s.items, item] }));
+  void tick();
+  return item.id;
+}
+
+export function removeFromQueue(id: string): void {
+  queueStore.update((s) => ({
+    ...s,
+    items: s.items.filter((i) => i.id !== id),
+  }));
+}
+
+export async function cancelItem(id: string): Promise<void> {
+  const state = get(queueStore);
+  const item = state.items.find((i) => i.id === id);
+  if (!item) return;
+
+  if (item.rustId) {
+    try {
+      await ipc.cancelDownload(item.rustId);
+    } catch (err) {
+      console.warn('[queue] cancel failed', err);
+    }
+    return;
+  }
+
+  // Not started yet — mark canceled locally.
+  queueStore.update((s) => ({
+    ...s,
+    items: s.items.map((i) =>
+      i.id === id ? { ...i, status: 'canceled' as QueueItemStatus } : i
+    ),
+  }));
+  void tick();
+}
+
+export function clearCompleted(): void {
+  queueStore.update((s) => ({
+    ...s,
+    items: s.items.filter(
+      (i) => i.status !== 'done' && i.status !== 'canceled' && i.status !== 'error'
+    ),
+  }));
+}
+
+export function moveItem(id: string, direction: -1 | 1): void {
+  queueStore.update((s) => {
+    const idx = s.items.findIndex((i) => i.id === id);
+    if (idx < 0) return s;
+    const target = idx + direction;
+    if (target < 0 || target >= s.items.length) return s;
+    const items = [...s.items];
+    [items[idx], items[target]] = [items[target], items[idx]];
+    return { ...s, items };
+  });
+  void tick();
+}
+
+export function setConcurrency(n: number): void {
+  const clamped = Math.max(1, Math.min(5, Math.floor(n)));
+  queueStore.update((s) => ({ ...s, concurrency: clamped }));
+  void tick();
+}
+
+async function tick(): Promise<void> {
+  const state = get(queueStore);
+  const running = state.items.filter(
+    (i) =>
+      i.status === 'starting' ||
+      i.status === 'downloading' ||
+      i.status === 'postprocess'
+  ).length;
+  if (running >= state.concurrency) return;
+
+  const next = state.items.find((i) => i.status === 'queued' && i.rustId === null);
+  if (!next) return;
+
+  queueStore.update((s) => ({
+    ...s,
+    items: s.items.map((i) =>
+      i.id === next.id ? { ...i, status: 'starting' as QueueItemStatus } : i
+    ),
+  }));
+
+  try {
+    const options: DownloadOptions = {
+      url: next.url,
+      outputDir: next.outputDir,
+      preset: next.preset,
+    };
+    const rustId = await ipc.startDownload(options);
+    queueStore.update((s) => ({
+      ...s,
+      items: s.items.map((i) =>
+        i.id === next.id ? { ...i, rustId, status: 'queued' as QueueItemStatus } : i
+      ),
+    }));
+    void tick();
+  } catch (err) {
+    queueStore.update((s) => ({
+      ...s,
+      items: s.items.map((i) =>
+        i.id === next.id
+          ? { ...i, status: 'error' as QueueItemStatus, message: String(err) }
+          : i
+      ),
+    }));
+    void tick();
+  }
+}

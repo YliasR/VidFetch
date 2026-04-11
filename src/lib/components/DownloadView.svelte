@@ -1,21 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { openPath } from '@tauri-apps/plugin-opener';
   import {
     downloadStore,
     initDownload,
     probe,
     setOutputDir,
     setPreset,
-    startDownload,
-    cancelCurrent,
     resetProbe,
   } from '$lib/stores/download';
+  import { addToQueue } from '$lib/stores/queue';
+  import { currentView } from '$lib/stores/nav';
   import type { QualityPreset } from '$lib/types';
 
   let urlInput = '';
   let initialized = false;
+  let lastAddedTitle: string | null = null;
 
   onMount(async () => {
     if (!initialized) {
@@ -34,39 +34,6 @@
 
   $: state = $downloadStore;
   $: info = state.probe.info;
-  $: job = state.job;
-  $: downloading =
-    job.status === 'queued' ||
-    job.status === 'downloading' ||
-    job.status === 'postprocess';
-
-  $: percent =
-    job.total && job.total > 0
-      ? Math.min(100, (job.downloaded / job.total) * 100)
-      : null;
-
-  function formatBytes(bytes: number | null | undefined): string {
-    if (bytes == null || bytes <= 0) return '0 B';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  }
-
-  function formatSpeed(bps: number | null): string {
-    if (bps == null) return '—';
-    return `${formatBytes(bps)}/s`;
-  }
-
-  function formatEta(seconds: number | null): string {
-    if (seconds == null) return '—';
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    if (m < 60) return `${m}m ${s}s`;
-    const h = Math.floor(m / 60);
-    return `${h}h ${m % 60}m`;
-  }
 
   function formatDuration(seconds: number | null): string {
     if (seconds == null) return '';
@@ -80,6 +47,7 @@
 
   async function handleProbe() {
     if (!urlInput.trim()) return;
+    lastAddedTitle = null;
     await probe(urlInput);
   }
 
@@ -94,19 +62,30 @@
     }
   }
 
-  async function openOutputDir() {
-    if (state.outputDir) {
-      try {
-        await openPath(state.outputDir);
-      } catch (err) {
-        console.warn('[download] open folder failed', err);
-      }
-    }
+  function handleAdd() {
+    if (state.probe.phase !== 'ready' || !state.probe.info || !state.probe.url) return;
+    if (!state.outputDir) return;
+
+    addToQueue({
+      url: state.probe.url,
+      preset: state.preset,
+      outputDir: state.outputDir,
+      info: state.probe.info,
+    });
+
+    lastAddedTitle = state.probe.info.title;
+    urlInput = '';
+    resetProbe();
   }
 
   function clearAndReset() {
     urlInput = '';
+    lastAddedTitle = null;
     resetProbe();
+  }
+
+  function goToQueue() {
+    currentView.set('queue');
   }
 </script>
 
@@ -124,14 +103,14 @@
         placeholder="https://www.youtube.com/watch?v=…"
         bind:value={urlInput}
         on:keydown={(e) => e.key === 'Enter' && handleProbe()}
-        disabled={state.probe.phase === 'probing' || downloading}
+        disabled={state.probe.phase === 'probing'}
         spellcheck="false"
         autocomplete="off"
       />
       <button
         class="btn btn-primary"
         on:click={handleProbe}
-        disabled={!urlInput.trim() || state.probe.phase === 'probing' || downloading}
+        disabled={!urlInput.trim() || state.probe.phase === 'probing'}
       >
         {#if state.probe.phase === 'probing'}
           Fetching…
@@ -145,6 +124,14 @@
       <div class="error-inline">
         <strong>Couldn't fetch that URL.</strong>
         <code>{state.probe.error}</code>
+      </div>
+    {/if}
+
+    {#if lastAddedTitle && !info}
+      <div class="added-banner">
+        <span class="check">✓</span>
+        <span class="added-text">Added <strong>{lastAddedTitle}</strong> to the queue.</span>
+        <button class="link-btn" on:click={goToQueue}>View queue →</button>
       </div>
     {/if}
   </div>
@@ -187,7 +174,6 @@
             class="preset"
             class:active={state.preset === p.id}
             on:click={() => setPreset(p.id)}
-            disabled={downloading}
           >
             <span class="preset-label">{p.label}</span>
             <span class="preset-note">{p.note}</span>
@@ -198,60 +184,15 @@
       <label class="label" for="outputDir">Save to</label>
       <div class="folder-row">
         <input id="outputDir" class="input" value={state.outputDir} readonly />
-        <button class="btn" on:click={pickFolder} disabled={downloading}>Browse…</button>
+        <button class="btn" on:click={pickFolder}>Browse…</button>
       </div>
 
       <div class="primary-action">
-        {#if downloading}
-          <button class="btn" on:click={cancelCurrent}>Cancel</button>
-        {:else if job.status === 'done'}
-          <button class="btn" on:click={openOutputDir}>Open folder</button>
-          <button class="btn btn-primary" on:click={clearAndReset}>Download another</button>
-        {:else}
-          <button class="btn btn-primary" on:click={startDownload}>Download</button>
-        {/if}
+        <button class="btn btn-primary" on:click={handleAdd} disabled={!state.outputDir}>
+          Add to queue
+        </button>
       </div>
     </div>
-
-    {#if job.id || job.status !== 'idle'}
-      <div class="card progress-card">
-        <div class="progress-head">
-          <strong>
-            {#if job.status === 'queued'}
-              Starting…
-            {:else if job.status === 'downloading'}
-              Downloading
-            {:else if job.status === 'postprocess'}
-              Post-processing
-            {:else if job.status === 'done'}
-              ✓ Done
-            {:else if job.status === 'canceled'}
-              Canceled
-            {:else if job.status === 'error'}
-              Error
-            {/if}
-          </strong>
-          <span class="muted num">
-            {#if job.status === 'downloading' || job.status === 'postprocess'}
-              {formatBytes(job.downloaded)}{job.total ? ` / ${formatBytes(job.total)}` : ''}
-              · {formatSpeed(job.speed)}
-              · ETA {formatEta(job.eta)}
-            {/if}
-          </span>
-        </div>
-        <div class="bar" class:indeterminate={percent === null && downloading}>
-          <div
-            class="fill"
-            class:done={job.status === 'done'}
-            class:error={job.status === 'error' || job.status === 'canceled'}
-            style:width={percent !== null ? `${percent}%` : undefined}
-          ></div>
-        </div>
-        {#if job.message}
-          <pre class="message">{job.message}</pre>
-        {/if}
-      </div>
-    {/if}
   {/if}
 </section>
 
@@ -310,6 +251,44 @@
     white-space: pre-wrap;
     color: inherit;
     opacity: 0.9;
+  }
+
+  .added-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+    color: var(--success);
+    font-size: 12.5px;
+  }
+
+  .added-banner .check {
+    font-weight: 700;
+  }
+
+  .added-text {
+    flex: 1;
+  }
+
+  .added-text strong {
+    color: var(--fg);
+  }
+
+  .link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .link-btn:hover {
+    text-decoration: underline;
   }
 
   .metadata {
@@ -462,77 +441,5 @@
     gap: 10px;
     justify-content: flex-end;
     margin-top: 4px;
-  }
-
-  .progress-card {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .progress-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  .num {
-    font-size: 12.5px;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-  }
-
-  .bar {
-    position: relative;
-    height: 10px;
-    border-radius: 999px;
-    background: var(--surface-3);
-    overflow: hidden;
-  }
-
-  .fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-    border-radius: inherit;
-    transition: width 160ms ease;
-  }
-
-  .fill.done {
-    width: 100% !important;
-    background: var(--success);
-  }
-
-  .fill.error {
-    width: 100% !important;
-    background: var(--danger);
-  }
-
-  .bar.indeterminate .fill {
-    width: 40%;
-    animation: slide 1.3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  @keyframes slide {
-    0% {
-      transform: translateX(-100%);
-    }
-    100% {
-      transform: translateX(300%);
-    }
-  }
-
-  .message {
-    margin: 0;
-    padding: 10px 12px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 12px;
-    white-space: pre-wrap;
-    color: var(--fg-muted);
-    max-height: 160px;
-    overflow: auto;
   }
 </style>

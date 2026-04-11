@@ -5,10 +5,12 @@
   import BootSplash from '$lib/components/BootSplash.svelte';
   import { initTheme } from '$lib/stores/theme';
   import { ytdlpStore, bootCheck } from '$lib/stores/ytdlp';
+  import { initQueue } from '$lib/stores/queue';
 
   onMount(async () => {
     await initTheme();
     await bootCheck();
+    await initQueue();
   });
 
   $: boot = $ytdlpStore.boot;

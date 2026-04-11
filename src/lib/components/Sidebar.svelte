@@ -1,5 +1,6 @@
 <script lang="ts">
   import { currentView, type View } from '$lib/stores/nav';
+  import { activeCount } from '$lib/stores/queue';
 
   const items: { id: View; label: string; icon: string }[] = [
     { id: 'download', label: 'Download', icon: '↓' },
@@ -19,6 +20,9 @@
     >
       <span class="icon">{item.icon}</span>
       <span class="label">{item.label}</span>
+      {#if item.id === 'queue' && $activeCount > 0}
+        <span class="badge">{$activeCount}</span>
+      {/if}
     </button>
   {/each}
 </nav>
@@ -65,5 +69,29 @@
     width: 18px;
     justify-content: center;
     font-size: 15px;
+  }
+
+  .label {
+    flex: 1;
+  }
+
+  .badge {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-item.active .badge {
+    background: var(--accent-fg);
+    color: var(--accent);
   }
 </style>
