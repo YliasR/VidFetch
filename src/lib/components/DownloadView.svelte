@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { open as openInShell } from '@tauri-apps/plugin-shell';
+  import { openPath } from '@tauri-apps/plugin-opener';
   import {
     downloadStore,
     initDownload,
@@ -180,7 +180,7 @@
     </div>
 
     <div class="card options">
-      <label class="label">Quality</label>
+      <div class="label">Quality</div>
       <div class="presets">
         {#each presets as p (p.id)}
           <button
@@ -347,6 +347,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
 

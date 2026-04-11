@@ -15,6 +15,9 @@
     "fs:default",
     "shell:default",
     "shell:allow-open",
+    "opener:default",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir",
     "store:default",
     "notification:default"
   ]

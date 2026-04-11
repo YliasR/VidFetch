@@ -20,6 +20,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 # tauri-plugin-updater deferred to v1.1 (requires signing keys + release channel)
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

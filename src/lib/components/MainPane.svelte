@@ -1,10 +1,11 @@
 <script lang="ts">
   import { currentView } from '$lib/stores/nav';
+  import DownloadView from './DownloadView.svelte';
   import PlaceholderView from './PlaceholderView.svelte';
 </script>
 
 {#if $currentView === 'download'}
-  <PlaceholderView title="Download" description="Paste a URL to fetch a video. Format browser, playlist picker and subtitle options come next." />
+  <DownloadView />
 {:else if $currentView === 'queue'}
   <PlaceholderView title="Queue" description="Active and queued downloads with pause / resume / cancel controls." />
 {:else if $currentView === 'history'}
