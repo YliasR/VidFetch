@@ -7,14 +7,48 @@ export interface VideoInfo {
   extractor: string | null;
   webpageUrl: string | null;
   isLive: boolean | null;
+  availableSubs: string[];
+  availableAutoSubs: string[];
 }
 
+export interface PlaylistEntry {
+  id: string;
+  title: string;
+  duration: number | null;
+  thumbnail: string | null;
+  uploader: string | null;
+  url: string;
+}
+
+export interface PlaylistInfo {
+  id: string;
+  title: string;
+  uploader: string | null;
+  thumbnail: string | null;
+  extractor: string | null;
+  webpageUrl: string | null;
+  count: number;
+  entries: PlaylistEntry[];
+}
+
+export type ProbeResult =
+  | { kind: 'single'; info: VideoInfo }
+  | { kind: 'playlist'; info: PlaylistInfo };
+
 export type QualityPreset = 'best' | 'p1080' | 'p720' | 'audio-mp3' | 'audio-opus';
+
+export type SubtitleMode = 'none' | 'embed' | 'separate';
+
+export type SponsorblockMode = 'off' | 'mark' | 'remove';
 
 export interface DownloadOptions {
   url: string;
   outputDir: string;
   preset: QualityPreset;
+  subtitleLangs?: string[];
+  subtitleMode?: SubtitleMode;
+  autoGenSubs?: boolean;
+  sponsorblock?: SponsorblockMode;
 }
 
 export type DownloadStatusKind =

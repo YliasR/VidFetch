@@ -1,9 +1,5 @@
 //! Translate a `DownloadOptions` struct from the frontend into a
 //! concrete yt-dlp CLI argument vector.
-//!
-//! For 0.1 alpha we support quick quality presets only. The full format
-//! browser and advanced toggles (subs, SponsorBlock, cookies, …) land in
-//! later phases and plug into this same builder.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -14,6 +10,15 @@ pub struct DownloadOptions {
     pub url: String,
     pub output_dir: String,
     pub preset: QualityPreset,
+
+    #[serde(default)]
+    pub subtitle_langs: Vec<String>,
+    #[serde(default)]
+    pub subtitle_mode: SubtitleMode,
+    #[serde(default)]
+    pub auto_gen_subs: bool,
+    #[serde(default)]
+    pub sponsorblock: SponsorblockMode,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -32,7 +37,6 @@ impl QualityPreset {
             Self::Best => "bv*+ba/b",
             Self::P1080 => "bv*[height<=1080]+ba/b[height<=1080]",
             Self::P720 => "bv*[height<=720]+ba/b[height<=720]",
-            // Audio variants use -x, so format selector just grabs the best audio.
             Self::AudioMp3 | Self::AudioOpus => "ba/b",
         }
     }
@@ -50,15 +54,31 @@ impl QualityPreset {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubtitleMode {
+    #[default]
+    None,
+    Embed,
+    Separate,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SponsorblockMode {
+    #[default]
+    Off,
+    Mark,
+    Remove,
+}
+
 /// The pipe-separated prefix yt-dlp uses for our parseable progress lines.
 pub const PROGRESS_PREFIX: &str = "VFPROG";
 
-/// Build the CLI args for a download. `ffmpeg_path` is the absolute path
-/// to our bundled ffmpeg binary (directory is passed to `--ffmpeg-location`).
 pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
 
-    // Point yt-dlp at our bundled ffmpeg — otherwise it scans PATH.
+    // Bundled ffmpeg — skip the PATH scan.
     if let Some(parent) = ffmpeg_path.parent() {
         args.push("--ffmpeg-location".into());
         args.push(parent.display().to_string());
@@ -85,7 +105,36 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
         }
     }
 
-    // Progress streaming — one line per tick, pipe-delimited, easy to parse.
+    // Subtitles — skip for audio-only (no video container to embed into).
+    if !opts.preset.is_audio_only()
+        && opts.subtitle_mode != SubtitleMode::None
+        && !opts.subtitle_langs.is_empty()
+    {
+        args.push("--write-subs".into());
+        if opts.auto_gen_subs {
+            args.push("--write-auto-subs".into());
+        }
+        args.push("--sub-langs".into());
+        args.push(opts.subtitle_langs.join(","));
+        if opts.subtitle_mode == SubtitleMode::Embed {
+            args.push("--embed-subs".into());
+        }
+    }
+
+    // SponsorBlock.
+    match opts.sponsorblock {
+        SponsorblockMode::Off => {}
+        SponsorblockMode::Mark => {
+            args.push("--sponsorblock-mark".into());
+            args.push("all".into());
+        }
+        SponsorblockMode::Remove => {
+            args.push("--sponsorblock-remove".into());
+            args.push("all".into());
+        }
+    }
+
+    // Progress streaming.
     args.push("--newline".into());
     args.push("--progress".into());
     args.push("--no-colors".into());
@@ -94,11 +143,11 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
         "download:{PROGRESS_PREFIX}|%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
     ));
 
-    // Quieter output — we still get progress lines via --progress.
     args.push("--no-warnings".into());
+    // Downloads always target a single item — playlists are exploded into
+    // individual queue entries at the frontend.
     args.push("--no-playlist".into());
 
-    // The URL always goes last.
     args.push(opts.url.clone());
 
     args

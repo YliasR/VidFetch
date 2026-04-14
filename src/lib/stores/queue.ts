@@ -6,8 +6,6 @@ import type {
   DownloadProgressEvent,
   DownloadStatusEvent,
   DownloadStatusKind,
-  QualityPreset,
-  VideoInfo,
 } from '$lib/types';
 
 export type QueueItemStatus =
@@ -19,13 +17,18 @@ export type QueueItemStatus =
   | 'error'
   | 'canceled';
 
+export interface QueueItemDisplay {
+  title: string;
+  thumbnail: string | null;
+  uploader: string | null;
+  duration: number | null;
+}
+
 export interface QueueItem {
   id: string;
   rustId: string | null;
-  url: string;
-  preset: QualityPreset;
-  outputDir: string;
-  info: VideoInfo | null;
+  options: DownloadOptions;
+  display: QueueItemDisplay;
   status: QueueItemStatus;
   downloaded: number;
   total: number | null;
@@ -122,18 +125,14 @@ export async function disposeQueue(): Promise<void> {
 }
 
 export function addToQueue(params: {
-  url: string;
-  preset: QualityPreset;
-  outputDir: string;
-  info: VideoInfo | null;
+  options: DownloadOptions;
+  display: QueueItemDisplay;
 }): string {
   const item: QueueItem = {
     id: newId(),
     rustId: null,
-    url: params.url,
-    preset: params.preset,
-    outputDir: params.outputDir,
-    info: params.info,
+    options: params.options,
+    display: params.display,
     status: 'queued',
     downloaded: 0,
     total: null,
@@ -168,7 +167,6 @@ export async function cancelItem(id: string): Promise<void> {
     return;
   }
 
-  // Not started yet — mark canceled locally.
   queueStore.update((s) => ({
     ...s,
     items: s.items.map((i) =>
@@ -227,12 +225,7 @@ async function tick(): Promise<void> {
   }));
 
   try {
-    const options: DownloadOptions = {
-      url: next.url,
-      outputDir: next.outputDir,
-      preset: next.preset,
-    };
-    const rustId = await ipc.startDownload(options);
+    const rustId = await ipc.startDownload(next.options);
     queueStore.update((s) => ({
       ...s,
       items: s.items.map((i) =>

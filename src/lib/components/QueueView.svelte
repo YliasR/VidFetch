@@ -61,6 +61,16 @@
     return null;
   }
 
+  function formatDuration(seconds: number | null): string {
+    if (seconds == null) return '';
+    const s = Math.floor(seconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${m}:${String(sec).padStart(2, '0')}`;
+  }
+
   function isActive(s: QueueItemStatus): boolean {
     return s === 'downloading' || s === 'postprocess' || s === 'starting';
   }
@@ -79,7 +89,7 @@
 
   async function openFolder(item: QueueItem) {
     try {
-      await openPath(item.outputDir);
+      await openPath(item.options.outputDir);
     } catch (err) {
       console.warn('[queue] open folder failed', err);
     }
@@ -128,16 +138,16 @@
       {#each items as item, idx (item.id)}
         {@const pct = percentOf(item)}
         <div class="card item" class:active={isActive(item.status)}>
-          {#if item.info?.thumbnail}
-            <img class="thumb" src={item.info.thumbnail} alt="" referrerpolicy="no-referrer" />
+          {#if item.display.thumbnail}
+            <img class="thumb" src={item.display.thumbnail} alt="" referrerpolicy="no-referrer" />
           {:else}
             <div class="thumb thumb-placeholder"></div>
           {/if}
 
           <div class="body">
             <div class="head">
-              <h3 title={item.info?.title ?? item.url}>
-                {item.info?.title ?? item.url}
+              <h3 title={item.display.title}>
+                {item.display.title}
               </h3>
               <span class="status" class:done={item.status === 'done'} class:err={item.status === 'error' || item.status === 'canceled'}>
                 {statusLabel(item.status)}
@@ -145,10 +155,14 @@
             </div>
 
             <div class="meta muted">
-              <span class="preset-tag">{item.preset}</span>
-              {#if item.info?.uploader}
+              <span class="preset-tag">{item.options.preset}</span>
+              {#if item.display.uploader}
                 <span class="dot">·</span>
-                <span>{item.info.uploader}</span>
+                <span>{item.display.uploader}</span>
+              {/if}
+              {#if item.display.duration}
+                <span class="dot">·</span>
+                <span>{formatDuration(item.display.duration)}</span>
               {/if}
               {#if item.status === 'downloading' || item.status === 'postprocess'}
                 <span class="dot">·</span>

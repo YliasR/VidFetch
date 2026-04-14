@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { DownloadOptions, VideoInfo } from './types';
+import type { DownloadOptions, ProbeResult } from './types';
 
 export interface BinariesStatus {
   ytdlp: boolean;
@@ -26,7 +26,7 @@ export const ipc = {
   installFfmpeg: () => invoke<string>('install_ffmpeg'),
   getVersions: () => invoke<Versions>('get_versions'),
 
-  probeUrl: (url: string) => invoke<VideoInfo>('probe_url', { url }),
+  probeUrl: (url: string) => invoke<ProbeResult>('probe_url', { url }),
   startDownload: (options: DownloadOptions) =>
     invoke<string>('start_download', { options }),
   cancelDownload: (id: string) => invoke<boolean>('cancel_download', { id }),
