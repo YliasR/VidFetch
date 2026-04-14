@@ -104,47 +104,139 @@ installers from GitHub by hand.
 
 ---
 
-## Longer-term / nice-to-haves
+---
 
-Not committed, just ideas:
+# Post-1.0 — point releases
 
-- Multi-item playlist as a single queue group (collapsible) instead of N
-  flat items.
-- Pause/resume on running jobs (Windows `NtSuspendProcess` /
-  `NtResumeProcess`; Unix `SIGSTOP` / `SIGCONT`).
-- Format browser table (per-format codec/size/fps) for power users who
-  want to pick manually.
-- Cross-platform builds in CI (macOS, Linux — matrix expansion of
-  `release.yml`).
-- Clipboard auto-paste detection when a yt-dlp-able URL lands on the
-  clipboard.
+Smaller, focused improvements that ride on top of the v1.0 foundation.
 
-### GIF pipeline
+## v1.1 — Queue polish
 
-- Export a downloaded video (or a trimmed range of one) as a GIF.
-  ffmpeg is already bundled, so this is a palette-gen + palette-use
-  two-pass: `ffmpeg -ss … -to … -i in.mp4 -vf palettegen palette.png`
-  then `ffmpeg -i in.mp4 -i palette.png -lavfi paletteuse out.gif`.
-  Expose width / fps / dithering controls.
-- Import an existing GIF as a source to re-edit (trim / resize / frame
-  drop / loop count / optimize).
-- "Append to GIF" flow: take an existing GIF and tack a range from a
-  video onto the end (or front) with matched palette.
+- [ ] **Playlist groups** — a set of entries added together from one
+      playlist probe collapses into a single queue row that expands to
+      show per-item progress. Bulk cancel / remove at the group level.
+- [ ] **Pause/resume on running jobs** — Windows
+      `NtSuspendProcess` / `NtResumeProcess` via the `windows` crate;
+      Unix `SIGSTOP` / `SIGCONT`. Exposed as a pause icon on active
+      queue items.
+- [ ] **Queue persistence across restarts** — save pending + queued
+      items to LazyStore on mutation; on boot, requeue as `queued`
+      (running jobs die with the process, so they go back to queued).
 
-### Light video editing
+**Ship tag:** `v1.1.0`.
 
-All ffmpeg-backed, so bundled binary handles everything. Rough scope:
+## v1.2 — Power-user UX
 
-- **Trim** — pick start / end (or multiple ranges) and write a cut.
-  `-c copy` when cuts land on keyframes, re-encode otherwise.
-- **Concatenate clips** — drag-and-drop list of local files, write a
-  single output via the concat demuxer (or filter if codecs differ).
-- **Remove audio** — `-an` on a passthrough encode.
-- **Replace / add audio** — swap in a local audio file, optional
-  fade-in/out, mix vs replace.
-- **Basic transforms** — rotate, crop, scale, adjust volume.
+- [ ] **Format browser** — full table of formats returned by
+      `yt-dlp -J` (resolution, fps, codec, ext, size, bitrate). Click a
+      row to pick that exact format instead of a preset. Preset stays
+      the default; this is an opt-in "Advanced" toggle.
+- [ ] **Clipboard auto-paste** — watch the clipboard for a URL whose
+      extractor yt-dlp recognizes; offer a one-click "Fetch the URL you
+      just copied" button on the Download view. Uses
+      `tauri-plugin-clipboard-manager`.
+- [ ] **Drag-and-drop URLs** — drop a text file or URL directly onto
+      the window to enqueue.
 
-Scope note: this turns VidFetch from "yt-dlp GUI" into "yt-dlp + tiny
-video studio." Worth its own major version (v2.x) with an "Edit" tab
-alongside Download / Queue, and probably a per-clip timeline view
-rather than stuffing it into the existing flow.
+**Ship tag:** `v1.2.0`.
+
+## v1.3 — Cross-platform builds
+
+- [ ] **macOS build** — matrix-expand `release.yml` to `macos-14`,
+      ship a `.dmg`. Requires picking the right yt-dlp/ffmpeg asset
+      URLs per-platform (already abstracted via `paths.rs`, but the
+      installer URLs in `ytdlp/installer.rs` are Windows-hardcoded).
+- [ ] **Linux build** — `ubuntu-22.04`, ship `.AppImage` and `.deb`.
+      Same installer URL work.
+- [ ] **Platform-specific theming sanity** — audit macOS traffic-light
+      offset, Linux window controls placement.
+
+**Ship tag:** `v1.3.0`.
+
+---
+
+# v2.0 and beyond — GIFs & video editing
+
+This is the pivot from "yt-dlp GUI" to "yt-dlp + tiny video studio."
+ffmpeg is already bundled, so no new binary deps — but the UX gets a
+new top-level **Edit** tab alongside Download / Queue, with a
+per-clip timeline view. Each v2.x release adds one slice of editing.
+
+## v2.0 — GIF pipeline
+
+- [ ] **Video → GIF export** — pick a downloaded video (or any local
+      file), trim the range, tweak width / fps / dithering. Two-pass
+      `ffmpeg -vf palettegen` then `-lavfi paletteuse` for clean
+      palettes. Progress streamed the same way download progress is.
+- [ ] **Import existing GIF** — drop a `.gif` into the Edit tab to
+      load it as a source clip (treated the same as a video internally).
+- [ ] **Re-edit imported GIF** — trim, resize, frame-drop to lower fps,
+      change loop count, or re-optimize the palette.
+- [ ] **Append video range to GIF** — take an existing GIF and tack a
+      range from a video onto the end (or front) with a matched
+      palette to avoid color-wash.
+
+**Ship tag:** `v2.0.0`.
+
+## v2.1 — Trim & cut
+
+- [ ] **Single-file trim** — pick start/end on a video scrubber, write
+      the cut. Use `-c copy` when both cuts land on keyframes, re-encode
+      otherwise (show user a "lossless / re-encoded" badge).
+- [ ] **Multi-range trim** — pick N ranges from a single source and
+      export them as separate files, or concat them into one (hand-off
+      to v2.2).
+- [ ] **Scrub preview** — lightweight ffmpeg thumbnail generation
+      along the timeline so the user isn't trimming blind.
+
+**Ship tag:** `v2.1.0`.
+
+## v2.2 — Multi-clip concat
+
+- [ ] **Drag-and-drop clip list** — order a list of local files in the
+      Edit tab, preview the sequence, write a single output.
+- [ ] **Fast path** (same codec/resolution/fps) — concat demuxer, no
+      re-encode.
+- [ ] **Slow path** (mixed sources) — concat filter with an ffmpeg
+      normalize pass so resolution/fps/audio-rate match.
+
+**Ship tag:** `v2.2.0`.
+
+## v2.3 — Audio ops
+
+- [ ] **Remove audio** — passthrough encode with `-an`.
+- [ ] **Replace audio** — pick a local audio file, align to video
+      length (trim or loop), optional fade-in/out, choose mix vs.
+      replace the existing track.
+- [ ] **Extract audio** — rip the audio track out to mp3/opus/flac
+      (shares the yt-dlp audio-preset code path).
+- [ ] **Volume adjust** — simple dB slider with waveform preview.
+
+**Ship tag:** `v2.3.0`.
+
+## v2.4 — Transforms
+
+- [ ] **Rotate / flip** — 90° rotations + horizontal/vertical flip.
+- [ ] **Crop** — rectangle selector overlaid on a preview frame.
+- [ ] **Scale** — resize to a target width/height or percentage,
+      optionally locking aspect ratio.
+- [ ] **Speed** — change playback speed with audio pitch preserved
+      (`atempo` chain for audio, `setpts` for video).
+
+**Ship tag:** `v2.4.0`.
+
+---
+
+# Unsorted / parking lot
+
+Ideas without a phase yet — pull into one of the above when they
+become concrete:
+
+- Batch preset application: select N queue items and re-apply a
+  different preset in one click.
+- Per-site defaults (e.g. always Opus for SoundCloud, always 720p
+  for Twitch VODs).
+- "Download only new items" on a channel or playlist URL, powered by
+  `--download-archive`.
+- Keyboard shortcuts layer (queue nav, add from clipboard, open
+  preferences).
