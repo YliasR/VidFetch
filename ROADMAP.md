@@ -33,9 +33,10 @@ yt-dlp configuration.
 
 ---
 
-## Phase 6b — Plumbing options
+## Phase 6b — Plumbing options + in-app updater
 
-The "how it runs" knobs — less visual, more plumbing.
+The "how it runs" knobs, plus self-update so end users don't re-download
+installers from GitHub by hand.
 
 - [ ] **Cookies** — dropdown: none / browser (chrome/firefox/edge/brave/…) /
       cookies.txt file path. Args: `--cookies-from-browser <b>` or
@@ -50,6 +51,17 @@ The "how it runs" knobs — less visual, more plumbing.
       `--no-overwrites` / `--force-overwrites` / yt-dlp's default numbering.
 - [ ] **Embed extras** — toggles for thumbnail, metadata, chapters. Args:
       `--embed-thumbnail`, `--embed-metadata`, `--embed-chapters`.
+- [ ] **In-app updater** — `tauri-plugin-updater` pointed at a GitHub
+      Releases `latest.json` manifest.
+  - Generate a signing keypair with `tauri signer generate`.
+  - Commit the public key to `tauri.conf.json > plugins.updater.pubkey`.
+  - Store the private key + password as repo secrets
+        (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`).
+  - Extend `release.yml` to sign the NSIS bundle and publish
+        `latest.json` alongside the installer.
+  - Settings panel: "Check for updates" button + "Update now" prompt
+        that downloads, verifies, and relaunches.
+  - Optional "Auto-check on launch" toggle (default on).
 
 **Ship tag:** `v0.4.0-alpha`.
 
@@ -84,8 +96,6 @@ The "how it runs" knobs — less visual, more plumbing.
       VidFetch" checkbox on finish.
 - [ ] **Code signing** — document the cert flow even if we don't sign
       for v1 (SmartScreen warning is accepted for now).
-- [ ] **Auto-update** — `tauri-plugin-updater` wired to GitHub Releases
-      `latest.json`. Needs a signing keypair.
 - [ ] **Clean-VM smoke test** — install on a fresh Windows 11 VM with no
       dev tools, confirm first-run wizard + a real download work.
 - [ ] **README screenshots** — one per main view, fox theme teaser.
@@ -108,3 +118,33 @@ Not committed, just ideas:
   `release.yml`).
 - Clipboard auto-paste detection when a yt-dlp-able URL lands on the
   clipboard.
+
+### GIF pipeline
+
+- Export a downloaded video (or a trimmed range of one) as a GIF.
+  ffmpeg is already bundled, so this is a palette-gen + palette-use
+  two-pass: `ffmpeg -ss … -to … -i in.mp4 -vf palettegen palette.png`
+  then `ffmpeg -i in.mp4 -i palette.png -lavfi paletteuse out.gif`.
+  Expose width / fps / dithering controls.
+- Import an existing GIF as a source to re-edit (trim / resize / frame
+  drop / loop count / optimize).
+- "Append to GIF" flow: take an existing GIF and tack a range from a
+  video onto the end (or front) with matched palette.
+
+### Light video editing
+
+All ffmpeg-backed, so bundled binary handles everything. Rough scope:
+
+- **Trim** — pick start / end (or multiple ranges) and write a cut.
+  `-c copy` when cuts land on keyframes, re-encode otherwise.
+- **Concatenate clips** — drag-and-drop list of local files, write a
+  single output via the concat demuxer (or filter if codecs differ).
+- **Remove audio** — `-an` on a passthrough encode.
+- **Replace / add audio** — swap in a local audio file, optional
+  fade-in/out, mix vs replace.
+- **Basic transforms** — rotate, crop, scale, adjust volume.
+
+Scope note: this turns VidFetch from "yt-dlp GUI" into "yt-dlp + tiny
+video studio." Worth its own major version (v2.x) with an "Edit" tab
+alongside Download / Queue, and probably a per-clip timeline view
+rather than stuffing it into the existing flow.
