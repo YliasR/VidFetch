@@ -45,6 +45,9 @@ pub struct DownloadOptions {
     pub embed_metadata: bool,
     #[serde(default)]
     pub embed_chapters: bool,
+
+    #[serde(default)]
+    pub output_format: OutputFormat,
 }
 
 fn default_true() -> bool {
@@ -62,12 +65,11 @@ pub enum QualityPreset {
 }
 
 impl QualityPreset {
-    fn format_selector(self) -> &'static str {
+    fn height_filter(self) -> &'static str {
         match self {
-            Self::Best => "bv*+ba/b",
-            Self::P1080 => "bv*[height<=1080]+ba/b[height<=1080]",
-            Self::P720 => "bv*[height<=720]+ba/b[height<=720]",
-            Self::AudioMp3 | Self::AudioOpus => "ba/b",
+            Self::P1080 => "[height<=1080]",
+            Self::P720 => "[height<=720]",
+            _ => "",
         }
     }
 
@@ -81,6 +83,27 @@ impl QualityPreset {
             Self::AudioOpus => Some("opus"),
             _ => None,
         }
+    }
+}
+
+/// Build the `-f` format selector, biasing codec choice so the MP4 and
+/// WebM containers actually accept the streams yt-dlp picks.
+fn build_format_selector(preset: QualityPreset, fmt: OutputFormat) -> String {
+    if preset.is_audio_only() {
+        return "ba/b".into();
+    }
+    let hf = preset.height_filter();
+    match fmt {
+        // H.264 + AAC → mp4-native, embeds in Discord / iOS / legacy players.
+        OutputFormat::Mp4 => format!(
+            "bv*{hf}[vcodec^=avc1]+ba[acodec^=mp4a]/bv*{hf}+ba/b{hf}"
+        ),
+        // VP9 + Opus → webm-native.
+        OutputFormat::Webm => format!(
+            "bv*{hf}[vcodec^=vp9]+ba[acodec^=opus]/bv*{hf}+ba/b{hf}"
+        ),
+        // Auto and MKV: just take the best available — MKV accepts anything.
+        OutputFormat::Auto | OutputFormat::Mkv => format!("bv*{hf}+ba/b{hf}"),
     }
 }
 
@@ -109,6 +132,20 @@ pub enum CookiesSource {
     None,
     Browser,
     File,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputFormat {
+    /// Let yt-dlp pick — whatever the source provides, merged as needed.
+    #[default]
+    Auto,
+    /// MP4 container. Best for compatibility (Discord embeds, iOS, older players).
+    Mp4,
+    /// Matroska container. Accepts any codec combination without re-encoding.
+    Mkv,
+    /// WebM container. Smaller files, VP9/Opus-friendly, no Safari support.
+    Webm,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -157,7 +194,7 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
 
     // Format selection.
     args.push("-f".into());
-    args.push(opts.preset.format_selector().into());
+    args.push(build_format_selector(opts.preset, opts.output_format));
 
     // Audio-only post-processing.
     if opts.preset.is_audio_only() {
@@ -167,6 +204,25 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
             args.push(codec.into());
             args.push("--audio-quality".into());
             args.push("0".into());
+        }
+    }
+
+    // Output container (only meaningful for video presets).
+    if !opts.preset.is_audio_only() {
+        match opts.output_format {
+            OutputFormat::Auto => {}
+            OutputFormat::Mp4 => {
+                args.push("--merge-output-format".into());
+                args.push("mp4".into());
+            }
+            OutputFormat::Mkv => {
+                args.push("--merge-output-format".into());
+                args.push("mkv".into());
+            }
+            OutputFormat::Webm => {
+                args.push("--merge-output-format".into());
+                args.push("webm".into());
+            }
         }
     }
 

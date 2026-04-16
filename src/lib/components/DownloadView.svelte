@@ -24,6 +24,7 @@
     ConflictMode,
     CookiesSource,
     DownloadOptions,
+    OutputFormat,
     PlaylistEntry,
     QualityPreset,
     SponsorblockMode,
@@ -71,6 +72,13 @@
   const conflictModes: { id: ConflictMode; label: string; note: string }[] = [
     { id: 'skip', label: 'Skip', note: 'Keep the existing file' },
     { id: 'overwrite', label: 'Overwrite', note: 'Replace it' },
+  ];
+
+  const outputFormats: { id: OutputFormat; label: string; note: string }[] = [
+    { id: 'auto', label: 'Auto', note: 'Whatever source provides' },
+    { id: 'mp4', label: 'MP4', note: 'Discord / iOS safe' },
+    { id: 'mkv', label: 'MKV', note: 'Lossless merge' },
+    { id: 'webm', label: 'WebM', note: 'Smaller, VP9/Opus' },
   ];
 
   const templatePresets: { label: string; template: string }[] = [
@@ -146,6 +154,7 @@
       embedThumbnail: adv.embedThumbnail,
       embedMetadata: adv.embedMetadata,
       embedChapters: adv.embedChapters,
+      outputFormat: adv.outputFormat,
     };
   }
 
@@ -440,6 +449,22 @@
           </button>
         {/each}
       </div>
+
+      {#if !isAudioPreset}
+        <div class="label">Format</div>
+        <div class="formats">
+          {#each outputFormats as f (f.id)}
+            <button
+              class="preset"
+              class:active={adv.outputFormat === f.id}
+              on:click={() => updateAdvanced({ outputFormat: f.id })}
+            >
+              <span class="preset-label">{f.label}</span>
+              <span class="preset-note">{f.note}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       <label class="label" for="outputDir">Save to</label>
       <div class="folder-row">
@@ -1023,6 +1048,12 @@
   .presets {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+
+  .formats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
   }
 

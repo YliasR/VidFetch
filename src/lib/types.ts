@@ -45,6 +45,8 @@ export type CookiesSource = 'none' | 'browser' | 'file';
 
 export type ConflictMode = 'skip' | 'overwrite';
 
+export type OutputFormat = 'auto' | 'mp4' | 'mkv' | 'webm';
+
 export interface DownloadOptions {
   url: string;
   outputDir: string;
@@ -69,6 +71,8 @@ export interface DownloadOptions {
   embedThumbnail?: boolean;
   embedMetadata?: boolean;
   embedChapters?: boolean;
+
+  outputFormat?: OutputFormat;
 }
 
 export type DownloadStatusKind =

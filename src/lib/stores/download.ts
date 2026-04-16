@@ -5,6 +5,7 @@ import { ipc } from '$lib/ipc';
 import type {
   ConflictMode,
   CookiesSource,
+  OutputFormat,
   PlaylistInfo,
   ProbeResult,
   QualityPreset,
@@ -40,6 +41,8 @@ export interface AdvancedOptions {
   embedThumbnail: boolean;
   embedMetadata: boolean;
   embedChapters: boolean;
+
+  outputFormat: OutputFormat;
 }
 
 interface State {
@@ -87,6 +90,8 @@ const defaultAdvanced: AdvancedOptions = {
   embedThumbnail: true,
   embedMetadata: true,
   embedChapters: false,
+
+  outputFormat: 'auto',
 };
 
 const initial: State = {
