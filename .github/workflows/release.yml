@@ -78,6 +78,11 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'VidFetch ${{ github.ref_name }}'
           releaseBody: ${{ steps.changelog.outputs.body }}
-          releaseDraft: true
-          prerelease: true
+          # Auto-publish as "latest" so the updater endpoint
+          # (/releases/latest/download/latest.json) resolves. Drafts are
+          # invisible, and the "Pre-release" flag excludes a release from
+          # /latest/ redirects even when published. Alpha status is made
+          # clear via the changelog body instead.
+          releaseDraft: false
+          prerelease: false
           args: ${{ matrix.args }}

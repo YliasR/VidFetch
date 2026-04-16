@@ -65,13 +65,7 @@ pub fn spawn_download(app: AppHandle, opts: DownloadOptions) -> anyhow::Result<S
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-
-    #[cfg(windows)]
-    {
-        // Prevent a flashing console window on yt-dlp spawn.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    super::hide_console(&mut cmd);
 
     let id_for_task = id.clone();
     let app_for_task = app.clone();

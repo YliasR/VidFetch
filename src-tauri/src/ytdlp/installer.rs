@@ -125,7 +125,10 @@ pub async fn read_ytdlp_version(app: &AppHandle) -> Result<String> {
     if !bin.exists() {
         anyhow::bail!("yt-dlp not installed");
     }
-    let out = Command::new(&bin).arg("--version").output().await?;
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--version");
+    super::hide_console(&mut cmd);
+    let out = cmd.output().await?;
     if !out.status.success() {
         anyhow::bail!(
             "yt-dlp --version exited with {:?}: {}",
@@ -238,7 +241,10 @@ pub async fn read_ffmpeg_version(app: &AppHandle) -> Result<String> {
     if !bin.exists() {
         anyhow::bail!("ffmpeg not installed");
     }
-    let out = Command::new(&bin).arg("-version").output().await?;
+    let mut cmd = Command::new(&bin);
+    cmd.arg("-version");
+    super::hide_console(&mut cmd);
+    let out = cmd.output().await?;
     if !out.status.success() {
         anyhow::bail!("ffmpeg -version exited with {:?}", out.status);
     }
