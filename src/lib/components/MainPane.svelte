@@ -2,6 +2,7 @@
   import { currentView } from '$lib/stores/nav';
   import DownloadView from './DownloadView.svelte';
   import QueueView from './QueueView.svelte';
+  import SettingsView from './SettingsView.svelte';
   import PlaceholderView from './PlaceholderView.svelte';
 </script>
 
@@ -14,5 +15,5 @@
 {:else if $currentView === 'presets'}
   <PlaceholderView title="Presets" description="Saved configurations: pick a preset and hit download — no fiddling." />
 {:else if $currentView === 'settings'}
-  <PlaceholderView title="Settings" description="yt-dlp + ffmpeg versions, update controls, output defaults, cookies, theme, and more." />
+  <SettingsView />
 {/if}

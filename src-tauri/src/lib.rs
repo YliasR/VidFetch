@@ -15,7 +15,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
-        // tauri-plugin-updater deferred to v1.1 — needs signing keys + release channel.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             app.manage(AppState::default());
             paths::ensure_app_dirs(&app.handle())?;

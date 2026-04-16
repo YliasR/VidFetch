@@ -41,14 +41,34 @@ export type SubtitleMode = 'none' | 'embed' | 'separate';
 
 export type SponsorblockMode = 'off' | 'mark' | 'remove';
 
+export type CookiesSource = 'none' | 'browser' | 'file';
+
+export type ConflictMode = 'skip' | 'overwrite';
+
 export interface DownloadOptions {
   url: string;
   outputDir: string;
   preset: QualityPreset;
+
   subtitleLangs?: string[];
   subtitleMode?: SubtitleMode;
   autoGenSubs?: boolean;
   sponsorblock?: SponsorblockMode;
+
+  cookiesSource?: CookiesSource;
+  cookiesBrowser?: string | null;
+  cookiesFile?: string | null;
+
+  rateLimit?: string | null;
+  retries?: number | null;
+  fragmentRetries?: number | null;
+
+  outputTemplate?: string | null;
+  conflictMode?: ConflictMode;
+
+  embedThumbnail?: boolean;
+  embedMetadata?: boolean;
+  embedChapters?: boolean;
 }
 
 export type DownloadStatusKind =

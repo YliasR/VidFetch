@@ -19,6 +19,36 @@ pub struct DownloadOptions {
     pub auto_gen_subs: bool,
     #[serde(default)]
     pub sponsorblock: SponsorblockMode,
+
+    #[serde(default)]
+    pub cookies_source: CookiesSource,
+    #[serde(default)]
+    pub cookies_browser: Option<String>,
+    #[serde(default)]
+    pub cookies_file: Option<String>,
+
+    #[serde(default)]
+    pub rate_limit: Option<String>,
+    #[serde(default)]
+    pub retries: Option<u32>,
+    #[serde(default)]
+    pub fragment_retries: Option<u32>,
+
+    #[serde(default)]
+    pub output_template: Option<String>,
+    #[serde(default)]
+    pub conflict_mode: ConflictMode,
+
+    #[serde(default = "default_true")]
+    pub embed_thumbnail: bool,
+    #[serde(default = "default_true")]
+    pub embed_metadata: bool,
+    #[serde(default)]
+    pub embed_chapters: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -72,8 +102,31 @@ pub enum SponsorblockMode {
     Remove,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CookiesSource {
+    #[default]
+    None,
+    Browser,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConflictMode {
+    /// Don't re-download files that already exist (yt-dlp default).
+    #[default]
+    Skip,
+    /// Replace the existing file.
+    Overwrite,
+}
+
 /// The pipe-separated prefix yt-dlp uses for our parseable progress lines.
 pub const PROGRESS_PREFIX: &str = "VFPROG";
+
+/// Default yt-dlp output template — mirrors what the frontend shows as the
+/// "reset to default" value for the template editor.
+pub const DEFAULT_OUTPUT_TEMPLATE: &str = "%(title)s.%(ext)s";
 
 pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
@@ -88,7 +141,19 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
     args.push("-P".into());
     args.push(opts.output_dir.clone());
     args.push("-o".into());
-    args.push("%(title)s.%(ext)s".into());
+    let template = opts
+        .output_template
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_OUTPUT_TEMPLATE);
+    args.push(template.into());
+
+    // File conflict behavior.
+    match opts.conflict_mode {
+        ConflictMode::Skip => args.push("--no-overwrites".into()),
+        ConflictMode::Overwrite => args.push("--force-overwrites".into()),
+    }
 
     // Format selection.
     args.push("-f".into());
@@ -132,6 +197,48 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
             args.push("--sponsorblock-remove".into());
             args.push("all".into());
         }
+    }
+
+    // Cookies.
+    match opts.cookies_source {
+        CookiesSource::None => {}
+        CookiesSource::Browser => {
+            if let Some(browser) = opts.cookies_browser.as_deref().filter(|s| !s.is_empty()) {
+                args.push("--cookies-from-browser".into());
+                args.push(browser.into());
+            }
+        }
+        CookiesSource::File => {
+            if let Some(path) = opts.cookies_file.as_deref().filter(|s| !s.is_empty()) {
+                args.push("--cookies".into());
+                args.push(path.into());
+            }
+        }
+    }
+
+    // Network knobs.
+    if let Some(rate) = opts.rate_limit.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--limit-rate".into());
+        args.push(rate.into());
+    }
+    if let Some(n) = opts.retries {
+        args.push("--retries".into());
+        args.push(n.to_string());
+    }
+    if let Some(n) = opts.fragment_retries {
+        args.push("--fragment-retries".into());
+        args.push(n.to_string());
+    }
+
+    // Embeds — thumbnail/metadata need ffmpeg (we bundle it).
+    if opts.embed_thumbnail {
+        args.push("--embed-thumbnail".into());
+    }
+    if opts.embed_metadata {
+        args.push("--embed-metadata".into());
+    }
+    if opts.embed_chapters {
+        args.push("--embed-chapters".into());
     }
 
     // Progress streaming.

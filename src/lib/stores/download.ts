@@ -3,6 +3,8 @@ import { LazyStore } from '@tauri-apps/plugin-store';
 import { downloadDir } from '@tauri-apps/api/path';
 import { ipc } from '$lib/ipc';
 import type {
+  ConflictMode,
+  CookiesSource,
   PlaylistInfo,
   ProbeResult,
   QualityPreset,
@@ -23,6 +25,21 @@ export interface AdvancedOptions {
   subtitleMode: SubtitleMode;
   autoGenSubs: boolean;
   sponsorblock: SponsorblockMode;
+
+  cookiesSource: CookiesSource;
+  cookiesBrowser: string;
+  cookiesFile: string;
+
+  rateLimit: string;
+  retries: number;
+  fragmentRetries: number;
+
+  outputTemplate: string;
+  conflictMode: ConflictMode;
+
+  embedThumbnail: boolean;
+  embedMetadata: boolean;
+  embedChapters: boolean;
 }
 
 interface State {
@@ -37,11 +54,39 @@ const OUTPUT_DIR_KEY = 'outputDir';
 const PRESET_KEY = 'preset';
 const ADVANCED_KEY = 'advanced';
 
+export const DEFAULT_OUTPUT_TEMPLATE = '%(title)s.%(ext)s';
+
+export const KNOWN_BROWSERS: { id: string; label: string }[] = [
+  { id: 'chrome', label: 'Chrome' },
+  { id: 'firefox', label: 'Firefox' },
+  { id: 'edge', label: 'Edge' },
+  { id: 'brave', label: 'Brave' },
+  { id: 'chromium', label: 'Chromium' },
+  { id: 'opera', label: 'Opera' },
+  { id: 'vivaldi', label: 'Vivaldi' },
+  { id: 'safari', label: 'Safari' },
+];
+
 const defaultAdvanced: AdvancedOptions = {
   subtitleLangs: [],
   subtitleMode: 'none',
   autoGenSubs: false,
   sponsorblock: 'off',
+
+  cookiesSource: 'none',
+  cookiesBrowser: '',
+  cookiesFile: '',
+
+  rateLimit: '',
+  retries: 10,
+  fragmentRetries: 10,
+
+  outputTemplate: DEFAULT_OUTPUT_TEMPLATE,
+  conflictMode: 'skip',
+
+  embedThumbnail: true,
+  embedMetadata: true,
+  embedChapters: false,
 };
 
 const initial: State = {
@@ -97,9 +142,13 @@ async function saveAdvanced(): Promise<void> {
   await persisted.save();
 }
 
-export async function setSubtitleMode(mode: SubtitleMode): Promise<void> {
-  downloadStore.update((s) => ({ ...s, advanced: { ...s.advanced, subtitleMode: mode } }));
+export async function updateAdvanced(patch: Partial<AdvancedOptions>): Promise<void> {
+  downloadStore.update((s) => ({ ...s, advanced: { ...s.advanced, ...patch } }));
   await saveAdvanced();
+}
+
+export async function setSubtitleMode(mode: SubtitleMode): Promise<void> {
+  await updateAdvanced({ subtitleMode: mode });
 }
 
 export async function toggleSubtitleLang(lang: string): Promise<void> {
@@ -113,13 +162,11 @@ export async function toggleSubtitleLang(lang: string): Promise<void> {
 }
 
 export async function setAutoGenSubs(v: boolean): Promise<void> {
-  downloadStore.update((s) => ({ ...s, advanced: { ...s.advanced, autoGenSubs: v } }));
-  await saveAdvanced();
+  await updateAdvanced({ autoGenSubs: v });
 }
 
 export async function setSponsorblock(mode: SponsorblockMode): Promise<void> {
-  downloadStore.update((s) => ({ ...s, advanced: { ...s.advanced, sponsorblock: mode } }));
-  await saveAdvanced();
+  await updateAdvanced({ sponsorblock: mode });
 }
 
 export async function probe(url: string): Promise<void> {

@@ -11,13 +11,18 @@
     toggleSubtitleLang,
     setAutoGenSubs,
     setSponsorblock,
+    updateAdvanced,
     resetProbe,
     singleInfo,
     playlistInfo,
+    DEFAULT_OUTPUT_TEMPLATE,
+    KNOWN_BROWSERS,
   } from '$lib/stores/download';
   import { addToQueue } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
   import type {
+    ConflictMode,
+    CookiesSource,
     DownloadOptions,
     PlaylistEntry,
     QualityPreset,
@@ -55,6 +60,24 @@
     { id: 'off', label: 'Off', note: 'Keep everything' },
     { id: 'mark', label: 'Mark', note: 'Add chapter markers' },
     { id: 'remove', label: 'Remove', note: 'Cut sponsors out' },
+  ];
+
+  const cookiesSources: { id: CookiesSource; label: string }[] = [
+    { id: 'none', label: 'None' },
+    { id: 'browser', label: 'From browser' },
+    { id: 'file', label: 'From cookies.txt' },
+  ];
+
+  const conflictModes: { id: ConflictMode; label: string; note: string }[] = [
+    { id: 'skip', label: 'Skip', note: 'Keep the existing file' },
+    { id: 'overwrite', label: 'Overwrite', note: 'Replace it' },
+  ];
+
+  const templatePresets: { label: string; template: string }[] = [
+    { label: 'Title', template: '%(title)s.%(ext)s' },
+    { label: 'Uploader - Title', template: '%(uploader)s - %(title)s.%(ext)s' },
+    { label: 'Date - Title', template: '%(upload_date)s - %(title)s.%(ext)s' },
+    { label: 'Channel / Title', template: '%(channel)s/%(title)s.%(ext)s' },
   ];
 
   $: state = $downloadStore;
@@ -112,7 +135,54 @@
       subtitleMode: adv.subtitleMode,
       autoGenSubs: adv.autoGenSubs,
       sponsorblock: adv.sponsorblock,
+      cookiesSource: adv.cookiesSource,
+      cookiesBrowser: adv.cookiesBrowser || null,
+      cookiesFile: adv.cookiesFile || null,
+      rateLimit: adv.rateLimit || null,
+      retries: adv.retries,
+      fragmentRetries: adv.fragmentRetries,
+      outputTemplate: adv.outputTemplate || null,
+      conflictMode: adv.conflictMode,
+      embedThumbnail: adv.embedThumbnail,
+      embedMetadata: adv.embedMetadata,
+      embedChapters: adv.embedChapters,
     };
+  }
+
+  function extForPreset(preset: QualityPreset): string {
+    if (preset === 'audio-mp3') return 'mp3';
+    if (preset === 'audio-opus') return 'opus';
+    return 'mp4';
+  }
+
+  function previewTemplate(template: string, info: VideoInfo | null, preset: QualityPreset): string {
+    const tpl = template.trim() || DEFAULT_OUTPUT_TEMPLATE;
+    const ext = extForPreset(preset);
+    const subs: Record<string, string> = {
+      title: info?.title ?? 'Sample Title',
+      uploader: info?.uploader ?? 'Channel Name',
+      channel: info?.uploader ?? 'Channel Name',
+      id: info?.id ?? 'abc123',
+      extractor: info?.extractor ?? 'youtube',
+      upload_date: '20260415',
+      ext,
+    };
+    return tpl.replace(/%\((\w+)\)s/g, (_, k) => subs[k] ?? `%(${k})s`);
+  }
+
+  async function pickCookiesFile() {
+    const picked = await openDialog({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'Cookies', extensions: ['txt'] }],
+    });
+    if (typeof picked === 'string' && picked) {
+      await updateAdvanced({ cookiesFile: picked });
+    }
+  }
+
+  function resetTemplate() {
+    void updateAdvanced({ outputTemplate: DEFAULT_OUTPUT_TEMPLATE });
   }
 
   function displayFromVideo(info: VideoInfo) {
@@ -482,6 +552,164 @@
                   <span class="preset-note">{m.note}</span>
                 </button>
               {/each}
+            </div>
+          </div>
+
+          <!-- Cookies -->
+          <div class="section">
+            <div class="label">Cookies</div>
+            <div class="cookies-source">
+              {#each cookiesSources as c (c.id)}
+                <button
+                  class="pill-btn"
+                  class:active={adv.cookiesSource === c.id}
+                  on:click={() => updateAdvanced({ cookiesSource: c.id })}
+                >{c.label}</button>
+              {/each}
+            </div>
+            {#if adv.cookiesSource === 'browser'}
+              <select
+                class="input small"
+                value={adv.cookiesBrowser}
+                on:change={(e) => updateAdvanced({ cookiesBrowser: (e.target as HTMLSelectElement).value })}
+              >
+                <option value="">Pick a browser…</option>
+                {#each KNOWN_BROWSERS as b (b.id)}
+                  <option value={b.id}>{b.label}</option>
+                {/each}
+              </select>
+              <p class="muted small">
+                yt-dlp reads cookies from the named browser's profile. The browser
+                should be closed or at least logged into the target site.
+              </p>
+            {:else if adv.cookiesSource === 'file'}
+              <div class="file-row">
+                <input
+                  class="input small"
+                  type="text"
+                  readonly
+                  value={adv.cookiesFile || 'No file selected'}
+                />
+                <button class="btn small" on:click={pickCookiesFile}>Browse…</button>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Network -->
+          <div class="section">
+            <div class="label">Network</div>
+            <div class="grid-3">
+              <label class="field">
+                <span class="field-label">Rate limit</span>
+                <input
+                  class="input small"
+                  type="text"
+                  placeholder="e.g. 2M, 500K"
+                  value={adv.rateLimit}
+                  on:change={(e) => updateAdvanced({ rateLimit: (e.target as HTMLInputElement).value })}
+                />
+              </label>
+              <label class="field">
+                <span class="field-label">Retries</span>
+                <input
+                  class="input small"
+                  type="number"
+                  min="0"
+                  max="99"
+                  value={adv.retries}
+                  on:change={(e) => {
+                    const n = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateAdvanced({ retries: Number.isNaN(n) ? 10 : Math.max(0, Math.min(99, n)) });
+                  }}
+                />
+              </label>
+              <label class="field">
+                <span class="field-label">Fragment retries</span>
+                <input
+                  class="input small"
+                  type="number"
+                  min="0"
+                  max="99"
+                  value={adv.fragmentRetries}
+                  on:change={(e) => {
+                    const n = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateAdvanced({ fragmentRetries: Number.isNaN(n) ? 10 : Math.max(0, Math.min(99, n)) });
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <!-- Output -->
+          <div class="section">
+            <div class="label">Output template</div>
+            <div class="template-row">
+              <input
+                class="input small mono"
+                type="text"
+                value={adv.outputTemplate}
+                on:change={(e) => updateAdvanced({ outputTemplate: (e.target as HTMLInputElement).value })}
+              />
+              <button class="btn small btn-ghost" on:click={resetTemplate} title="Reset to default">↺</button>
+            </div>
+            <div class="template-presets">
+              {#each templatePresets as tp (tp.template)}
+                <button
+                  class="pill-btn small-pill"
+                  class:active={adv.outputTemplate === tp.template}
+                  on:click={() => updateAdvanced({ outputTemplate: tp.template })}
+                  title={tp.template}
+                >{tp.label}</button>
+              {/each}
+            </div>
+            <div class="preview-row">
+              <span class="preview-label">Preview:</span>
+              <span class="preview-value">{previewTemplate(adv.outputTemplate, single, state.preset)}</span>
+            </div>
+
+            <div class="sub-sublabel">If the file already exists</div>
+            <div class="conflict-modes">
+              {#each conflictModes as m (m.id)}
+                <button
+                  class="preset"
+                  class:active={adv.conflictMode === m.id}
+                  on:click={() => updateAdvanced({ conflictMode: m.id })}
+                >
+                  <span class="preset-label">{m.label}</span>
+                  <span class="preset-note">{m.note}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Embed extras -->
+          <div class="section">
+            <div class="label">Embed extras</div>
+            <div class="embed-toggles">
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  checked={adv.embedThumbnail}
+                  on:change={(e) => updateAdvanced({ embedThumbnail: (e.target as HTMLInputElement).checked })}
+                />
+                <span>Thumbnail</span>
+              </label>
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  checked={adv.embedMetadata}
+                  on:change={(e) => updateAdvanced({ embedMetadata: (e.target as HTMLInputElement).checked })}
+                />
+                <span>Metadata</span>
+              </label>
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  checked={adv.embedChapters}
+                  on:change={(e) => updateAdvanced({ embedChapters: (e.target as HTMLInputElement).checked })}
+                />
+                <span>Chapters</span>
+              </label>
             </div>
           </div>
         </div>
@@ -995,6 +1223,127 @@
   .muted.small {
     font-size: 12px;
     margin: 0;
+  }
+
+  .pill-btn {
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+
+  .pill-btn:hover:not(:disabled) {
+    border-color: var(--border-strong);
+  }
+
+  .pill-btn.active {
+    background: var(--accent-muted);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .pill-btn.small-pill {
+    padding: 4px 10px;
+    font-size: 11.5px;
+  }
+
+  .cookies-source {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .file-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .file-row .input {
+    flex: 1;
+    font-family: 'Consolas', 'Menlo', monospace;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    font-weight: 600;
+  }
+
+  .template-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .template-row .input {
+    flex: 1;
+  }
+
+  .input.mono {
+    font-family: 'Consolas', 'Menlo', monospace;
+  }
+
+  .template-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .preview-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 8px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .preview-label {
+    color: var(--fg-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: 0.4px;
+    flex-shrink: 0;
+  }
+
+  .preview-value {
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conflict-modes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .embed-toggles {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
   }
 
   .primary-action {
