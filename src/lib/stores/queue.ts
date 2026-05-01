@@ -2,11 +2,14 @@ import { writable, get, derived } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { ipc } from '$lib/ipc';
 import type {
+  DownloadLogEvent,
   DownloadOptions,
   DownloadProgressEvent,
   DownloadStatusEvent,
   DownloadStatusKind,
 } from '$lib/types';
+import { addHistoryEntry, initHistory } from './history';
+import { initNotifications, notifyJobDone } from './notifications';
 
 export type QueueItemStatus =
   | 'queued'
@@ -23,6 +26,13 @@ export interface QueueItemDisplay {
   uploader: string | null;
   duration: number | null;
 }
+
+export interface QueueLogLine {
+  line: string;
+  stream: 'stdout' | 'stderr';
+}
+
+const MAX_LOG_LINES_PER_ITEM = 800;
 
 export interface QueueItem {
   id: string;
@@ -41,11 +51,13 @@ export interface QueueItem {
 interface QueueState {
   items: QueueItem[];
   concurrency: number;
+  logs: Record<string, QueueLogLine[]>;
 }
 
 const initial: QueueState = {
   items: [],
   concurrency: 2,
+  logs: {},
 };
 
 export const queueStore = writable<QueueState>(initial);
@@ -63,6 +75,7 @@ export const activeCount = derived(queueStore, ($q) =>
 let listenersInstalled = false;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenProgress: UnlistenFn | null = null;
+let unlistenLog: UnlistenFn | null = null;
 
 function newId(): string {
   return `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -76,20 +89,37 @@ export async function initQueue(): Promise<void> {
   if (listenersInstalled) return;
   listenersInstalled = true;
 
+  await initHistory();
+  await initNotifications();
+
   unlistenStatus = await listen<DownloadStatusEvent>('download://status', (e) => {
     const payload = e.payload;
+    let completed: QueueItem | null = null;
+    let failed: QueueItem | null = null;
+
     queueStore.update((s) => ({
       ...s,
-      items: s.items.map((item) =>
-        item.rustId === payload.id
-          ? {
-              ...item,
-              status: mapStatus(payload.status),
-              message: payload.message ?? item.message,
-            }
-          : item
-      ),
+      items: s.items.map((item) => {
+        if (item.rustId !== payload.id) return item;
+        const next: QueueItem = {
+          ...item,
+          status: mapStatus(payload.status),
+          message: payload.message ?? item.message,
+        };
+        if (next.status === 'done' && item.status !== 'done') completed = next;
+        if (next.status === 'error' && item.status !== 'error') failed = next;
+        return next;
+      }),
     }));
+
+    if (completed) {
+      void recordCompletion(completed);
+    }
+    if (failed) {
+      const f = failed as QueueItem;
+      void notifyJobDone('Download failed', f.display.title);
+    }
+
     void tick();
   });
 
@@ -110,6 +140,39 @@ export async function initQueue(): Promise<void> {
       ),
     }));
   });
+
+  unlistenLog = await listen<DownloadLogEvent>('download://log', (e) => {
+    const payload = e.payload;
+    queueStore.update((s) => {
+      const item = s.items.find((i) => i.rustId === payload.id);
+      if (!item) return s;
+      const key = item.id;
+      const prev = s.logs[key] ?? [];
+      const next = prev.length >= MAX_LOG_LINES_PER_ITEM
+        ? [...prev.slice(prev.length - MAX_LOG_LINES_PER_ITEM + 1), { line: payload.line, stream: payload.stream }]
+        : [...prev, { line: payload.line, stream: payload.stream }];
+      return { ...s, logs: { ...s.logs, [key]: next } };
+    });
+  });
+}
+
+async function recordCompletion(item: QueueItem): Promise<void> {
+  try {
+    await addHistoryEntry({
+      title: item.display.title,
+      thumbnail: item.display.thumbnail,
+      uploader: item.display.uploader,
+      url: item.options.url,
+      outputDir: item.options.outputDir,
+      preset: item.options.preset,
+      outputFormat: item.options.outputFormat ?? null,
+      sizeBytes: item.total ?? item.downloaded ?? null,
+      options: item.options,
+    });
+  } catch (err) {
+    console.warn('[queue] history record failed', err);
+  }
+  void notifyJobDone('Download complete', item.display.title);
 }
 
 export async function disposeQueue(): Promise<void> {
@@ -120,6 +183,10 @@ export async function disposeQueue(): Promise<void> {
   if (unlistenProgress) {
     unlistenProgress();
     unlistenProgress = null;
+  }
+  if (unlistenLog) {
+    unlistenLog();
+    unlistenLog = null;
   }
   listenersInstalled = false;
 }
@@ -147,10 +214,14 @@ export function addToQueue(params: {
 }
 
 export function removeFromQueue(id: string): void {
-  queueStore.update((s) => ({
-    ...s,
-    items: s.items.filter((i) => i.id !== id),
-  }));
+  queueStore.update((s) => {
+    const { [id]: _, ...rest } = s.logs;
+    return {
+      ...s,
+      items: s.items.filter((i) => i.id !== id),
+      logs: rest,
+    };
+  });
 }
 
 export async function cancelItem(id: string): Promise<void> {
@@ -177,12 +248,17 @@ export async function cancelItem(id: string): Promise<void> {
 }
 
 export function clearCompleted(): void {
-  queueStore.update((s) => ({
-    ...s,
-    items: s.items.filter(
+  queueStore.update((s) => {
+    const keep = s.items.filter(
       (i) => i.status !== 'done' && i.status !== 'canceled' && i.status !== 'error'
-    ),
-  }));
+    );
+    const keepIds = new Set(keep.map((i) => i.id));
+    const logs: Record<string, QueueLogLine[]> = {};
+    for (const [k, v] of Object.entries(s.logs)) {
+      if (keepIds.has(k)) logs[k] = v;
+    }
+    return { ...s, items: keep, logs };
+  });
 }
 
 export function moveItem(id: string, direction: -1 | 1): void {

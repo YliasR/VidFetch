@@ -15,6 +15,7 @@
   import { currentView } from '$lib/stores/nav';
 
   let initialized = false;
+  let logsOpen: Record<string, boolean> = {};
 
   onMount(async () => {
     if (!initialized) {
@@ -98,6 +99,10 @@
   function onConcurrencyChange(e: Event) {
     const v = parseInt((e.target as HTMLInputElement).value, 10);
     if (!Number.isNaN(v)) setConcurrency(v);
+  }
+
+  function toggleLog(id: string) {
+    logsOpen = { ...logsOpen, [id]: !logsOpen[id] };
   }
 </script>
 
@@ -187,6 +192,16 @@
 
             {#if item.message && (item.status === 'error' || item.status === 'canceled')}
               <pre class="message">{item.message}</pre>
+            {/if}
+
+            {#if state.logs[item.id]?.length}
+              <button class="log-toggle" on:click={() => toggleLog(item.id)}>
+                {logsOpen[item.id] ? '▾' : '▸'} Log ({state.logs[item.id].length})
+              </button>
+              {#if logsOpen[item.id]}
+                <pre class="log-panel">{#each state.logs[item.id] as l}<span class:err={l.stream === 'stderr'}>{l.line}</span>
+{/each}</pre>
+              {/if}
             {/if}
           </div>
 
@@ -440,6 +455,45 @@
     color: var(--fg-muted);
     max-height: 100px;
     overflow: auto;
+  }
+
+  .log-toggle {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 2px 6px;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+  }
+
+  .log-toggle:hover {
+    color: var(--fg);
+  }
+
+  .log-panel {
+    margin: 4px 0 0 0;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    color: var(--fg-muted);
+    max-height: 220px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .log-panel .err {
+    color: var(--danger);
   }
 
   .actions {

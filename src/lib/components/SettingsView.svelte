@@ -5,6 +5,11 @@
   import { relaunch } from '@tauri-apps/plugin-process';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { ipc, type Versions } from '$lib/ipc';
+  import {
+    notifPrefs,
+    initNotifications,
+    setNotificationsEnabled,
+  } from '$lib/stores/notifications';
 
   type UpdateState =
     | { phase: 'idle' }
@@ -28,8 +33,14 @@
     } catch {
       appVersion = '?';
     }
+    await initNotifications();
     await refreshBinaryVersions();
   });
+
+  async function onToggleNotifications(e: Event) {
+    const checked = (e.target as HTMLInputElement).checked;
+    await setNotificationsEnabled(checked);
+  }
 
   async function refreshBinaryVersions() {
     try {
@@ -211,6 +222,30 @@
     {/if}
   </div>
 
+  <!-- Notifications -->
+  <div class="card">
+    <div class="row">
+      <div class="label-col">
+        <div class="label">Notifications</div>
+        <div class="value">Desktop alerts on job completion</div>
+      </div>
+      <div class="action-col">
+        <label class="switch">
+          <input
+            type="checkbox"
+            checked={$notifPrefs.enabled}
+            on:change={onToggleNotifications}
+          />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <p class="muted small">
+      Sends a system toast when a download finishes or fails. First time you enable it,
+      Windows may ask for permission.
+    </p>
+  </div>
+
   <!-- Links -->
   <div class="card about">
     <div class="label">About</div>
@@ -366,5 +401,51 @@
 
   .link:hover {
     text-decoration: underline;
+  }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background-color 160ms ease, border-color 160ms ease;
+    cursor: pointer;
+  }
+
+  .slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--fg-muted);
+    border-radius: 50%;
+    transition: transform 160ms ease, background-color 160ms ease;
+  }
+
+  .switch input:checked + .slider {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .switch input:checked + .slider::before {
+    transform: translate(20px, -50%);
+    background: var(--accent-fg);
   }
 </style>

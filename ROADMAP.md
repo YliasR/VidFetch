@@ -1,7 +1,7 @@
 # VidFetch Roadmap
 
-Phases 1–5 shipped in the `v0.1.0-alpha` / `v0.2.0-alpha` releases. Remaining
-work is grouped below. Each phase is its own checkpoint and gets an alpha tag.
+Phases 1–6 shipped (current: `v0.4.2`). Remaining work is grouped below.
+Each phase is its own checkpoint and gets an alpha tag.
 
 ---
 
@@ -67,25 +67,48 @@ installers from GitHub by hand.
 
 ---
 
-## Phase 7 — Persistence & polish
+## Phase 7a — History & logs (next up)
+
+The "what just happened" surface. Pulls log capture out of dev-tools and
+keeps a record after jobs finish.
 
 - [ ] **History** — persisted list of completed downloads (title, path,
       timestamp, preset, size). Open folder / re-download actions.
-- [ ] **Presets** — save current advanced config as a named preset, apply
-      from a dropdown on the Download view.
-- [ ] **Download archive** — `--download-archive` file stored per-preset
-      so re-runs skip previously-fetched items.
+      Stored via `tauri-plugin-store`; trimmed to a sane cap.
 - [ ] **Raw log panel** — collapsible per queue item, shows captured
-      stdout/stderr from yt-dlp. Useful for debugging weird extractor
-      failures.
-- [ ] **Desktop notifications** on job completion (plugin-notification).
-- [ ] **Error recovery UI** — surface known patterns ("yt-dlp outdated")
-      with a one-click "Update now" action.
+      stdout/stderr from yt-dlp (`download://log` is already emitted).
+      Useful for debugging weird extractor failures.
+- [ ] **Desktop notifications** on job completion via
+      `tauri-plugin-notification`. Toggle in settings, default on.
+
+**Ship tag:** `v0.5.0-alpha`.
+
+---
+
+## Phase 7b — Presets & archive
+
+Reusable configurations and skip-already-downloaded support.
+
+- [ ] **Presets** — save current advanced config as a named preset, apply
+      from a dropdown on the Download view. CRUD UI in settings.
+- [ ] **Download archive** — `--download-archive` file stored per-preset
+      so re-runs skip previously-fetched items. Toggle on the preset.
+
+**Ship tag:** `v0.6.0-alpha`.
+
+---
+
+## Phase 7c — Polish
+
+The "feels finished" pass before the v1 push.
+
+- [ ] **Error recovery UI** — surface known patterns ("yt-dlp outdated",
+      "ffmpeg missing", "HTTP 403") with a one-click action.
 - [ ] **Fox theme unlock polish** — tail-wag animation on logo, `:3`
       toast, persistence verified.
 - [ ] **Light theme** pass — audit all views for contrast / legibility.
 
-**Ship tag:** `v0.5.0-alpha` (or beta if it feels ready).
+**Ship tag:** `v0.7.0-alpha` (or beta if it feels ready).
 
 ---
 
