@@ -73,6 +73,7 @@ export interface DownloadOptions {
   embedChapters?: boolean;
 
   outputFormat?: OutputFormat;
+  downloadArchive?: string | null;
 }
 
 export type DownloadStatusKind =

@@ -15,11 +15,13 @@
     resetProbe,
     singleInfo,
     playlistInfo,
+    applyDownloadConfig,
     DEFAULT_OUTPUT_TEMPLATE,
     KNOWN_BROWSERS,
   } from '$lib/stores/download';
   import { addToQueue } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
+  import { presetsStore, initPresets, setActivePreset } from '$lib/stores/presets';
   import type {
     ConflictMode,
     CookiesSource,
@@ -45,6 +47,7 @@
   onMount(async () => {
     if (!initialized) {
       await initDownload();
+      await initPresets();
       initialized = true;
     }
   });
@@ -92,6 +95,9 @@
   $: single = singleInfo(state);
   $: playlist = playlistInfo(state);
   $: adv = state.advanced;
+  $: savedPresets = $presetsStore.presets;
+  $: activePresetId = $presetsStore.activePresetId ?? '';
+  $: activeSavedPreset = savedPresets.find((p) => p.id === activePresetId) ?? null;
   $: isAudioPreset = state.preset === 'audio-mp3' || state.preset === 'audio-opus';
 
   $: {
@@ -155,6 +161,10 @@
       embedMetadata: adv.embedMetadata,
       embedChapters: adv.embedChapters,
       outputFormat: adv.outputFormat,
+      downloadArchive:
+        activeSavedPreset?.archiveEnabled && activeSavedPreset.archivePath
+          ? activeSavedPreset.archivePath
+          : null,
     };
   }
 
@@ -293,6 +303,18 @@
 
   async function onSubtitleModeChange(e: Event) {
     await setSubtitleMode((e.target as HTMLSelectElement).value as SubtitleMode);
+  }
+
+  async function onSavedPresetChange(e: Event) {
+    const id = (e.target as HTMLSelectElement).value;
+    await setActivePreset(id || null);
+    const preset = savedPresets.find((p) => p.id === id);
+    if (preset) {
+      await applyDownloadConfig({
+        preset: preset.preset,
+        advanced: preset.advanced,
+      });
+    }
   }
 </script>
 
@@ -436,6 +458,26 @@
 
   {#if single || playlist}
     <div class="card options">
+      {#if savedPresets.length > 0}
+        <label class="label" for="savedPreset">Preset</label>
+        <div class="preset-select-row">
+          <select
+            id="savedPreset"
+            class="input"
+            value={activePresetId}
+            on:change={onSavedPresetChange}
+          >
+            <option value="">Current settings</option>
+            {#each savedPresets as p (p.id)}
+              <option value={p.id}>{p.name}</option>
+            {/each}
+          </select>
+          {#if activeSavedPreset?.archiveEnabled}
+            <span class="archive-pill" title={activeSavedPreset.archivePath}>Archive on</span>
+          {/if}
+        </div>
+      {/if}
+
       <div class="label">Quality</div>
       <div class="presets">
         {#each presets as p (p.id)}
@@ -1035,6 +1077,28 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .preset-select-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .preset-select-row .input {
+    flex: 1;
+  }
+
+  .archive-pill {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--accent-muted);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
   }
 
   .label {

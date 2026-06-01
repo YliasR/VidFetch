@@ -48,6 +48,8 @@ pub struct DownloadOptions {
 
     #[serde(default)]
     pub output_format: OutputFormat,
+    #[serde(default)]
+    pub download_archive: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -295,6 +297,13 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
     }
     if opts.embed_chapters {
         args.push("--embed-chapters".into());
+    }
+
+    // Per-preset archive file: yt-dlp records successful downloads here and
+    // skips IDs already present on future runs.
+    if let Some(path) = opts.download_archive.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--download-archive".into());
+        args.push(path.into());
     }
 
     // Progress streaming.

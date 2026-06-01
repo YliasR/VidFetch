@@ -45,7 +45,7 @@ export interface AdvancedOptions {
   outputFormat: OutputFormat;
 }
 
-interface State {
+export interface DownloadState {
   probe: ProbeState;
   preset: QualityPreset;
   outputDir: string;
@@ -94,14 +94,14 @@ const defaultAdvanced: AdvancedOptions = {
   outputFormat: 'auto',
 };
 
-const initial: State = {
+const initial: DownloadState = {
   probe: { phase: 'idle', url: '', result: null, error: null },
   preset: 'best',
   outputDir: '',
   advanced: { ...defaultAdvanced },
 };
 
-export const downloadStore = writable<State>(initial);
+export const downloadStore = writable<DownloadState>(initial);
 
 const persisted = new LazyStore(SETTINGS_FILE);
 let initialized = false;
@@ -150,6 +150,20 @@ async function saveAdvanced(): Promise<void> {
 export async function updateAdvanced(patch: Partial<AdvancedOptions>): Promise<void> {
   downloadStore.update((s) => ({ ...s, advanced: { ...s.advanced, ...patch } }));
   await saveAdvanced();
+}
+
+export async function applyDownloadConfig(config: {
+  preset: QualityPreset;
+  advanced: AdvancedOptions;
+}): Promise<void> {
+  downloadStore.update((s) => ({
+    ...s,
+    preset: config.preset,
+    advanced: { ...defaultAdvanced, ...config.advanced },
+  }));
+  await persisted.set(PRESET_KEY, config.preset);
+  await persisted.set(ADVANCED_KEY, get(downloadStore).advanced);
+  await persisted.save();
 }
 
 export async function setSubtitleMode(mode: SubtitleMode): Promise<void> {
@@ -201,10 +215,10 @@ export function resetProbe(): void {
   downloadStore.update((s) => ({ ...s, probe: { ...initial.probe } }));
 }
 
-export function singleInfo(state: State): VideoInfo | null {
+export function singleInfo(state: DownloadState): VideoInfo | null {
   return state.probe.result?.kind === 'single' ? state.probe.result.info : null;
 }
 
-export function playlistInfo(state: State): PlaylistInfo | null {
+export function playlistInfo(state: DownloadState): PlaylistInfo | null {
   return state.probe.result?.kind === 'playlist' ? state.probe.result.info : null;
 }

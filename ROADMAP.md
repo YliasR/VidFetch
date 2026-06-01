@@ -1,6 +1,6 @@
 # VidFetch Roadmap
 
-Phases 1–6 shipped (current: `v0.4.2`). Remaining work is grouped below.
+Phases 1–7b shipped (current: `v0.6.0-alpha`). Remaining work is grouped below.
 Each phase is its own checkpoint and gets an alpha tag.
 
 ---
@@ -85,13 +85,13 @@ keeps a record after jobs finish.
 
 ---
 
-## Phase 7b — Presets & archive
+## Phase 7b - Presets & archive
 
 Reusable configurations and skip-already-downloaded support.
 
-- [ ] **Presets** — save current advanced config as a named preset, apply
-      from a dropdown on the Download view. CRUD UI in settings.
-- [ ] **Download archive** — `--download-archive` file stored per-preset
+- [x] **Presets** - save current advanced config as a named preset, apply
+      from a dropdown on the Download view. CRUD UI in the Presets view.
+- [x] **Download archive** - `--download-archive` file stored per-preset
       so re-runs skip previously-fetched items. Toggle on the preset.
 
 **Ship tag:** `v0.6.0-alpha`.

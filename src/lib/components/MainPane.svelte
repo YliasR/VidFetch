@@ -4,7 +4,7 @@
   import QueueView from './QueueView.svelte';
   import SettingsView from './SettingsView.svelte';
   import HistoryView from './HistoryView.svelte';
-  import PlaceholderView from './PlaceholderView.svelte';
+  import PresetsView from './PresetsView.svelte';
 </script>
 
 {#if $currentView === 'download'}
@@ -14,7 +14,7 @@
 {:else if $currentView === 'history'}
   <HistoryView />
 {:else if $currentView === 'presets'}
-  <PlaceholderView title="Presets" description="Saved configurations: pick a preset and hit download — no fiddling." />
+  <PresetsView />
 {:else if $currentView === 'settings'}
   <SettingsView />
 {/if}
