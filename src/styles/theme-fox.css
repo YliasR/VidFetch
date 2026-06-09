@@ -32,6 +32,11 @@
   transform-origin: center;
 }
 
+/* Wags faster when petted */
+:root[data-theme='fox'] .logo-glyph:hover {
+  animation-duration: 600ms;
+}
+
 @keyframes tail-wag {
   0%,
   100% {
@@ -39,6 +44,12 @@
   }
   50% {
     transform: rotate(2deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='fox'] .logo-glyph {
+    animation: none;
   }
 }
 

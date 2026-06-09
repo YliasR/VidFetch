@@ -8,15 +8,17 @@
 
   --fg: #1a1d26;
   --fg-muted: #5c6378;
-  --fg-dim: #8a92a6;
+  --fg-dim: #7c8499;
 
-  --accent: #3b82f6;
-  --accent-strong: #2563eb;
-  --accent-muted: rgba(59, 130, 246, 0.15);
+  /* Darker than the dark theme's accent: small status text and white-on-accent
+     buttons need ~4.5:1 against light surfaces. */
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-muted: rgba(37, 99, 235, 0.14);
   --accent-fg: #ffffff;
 
-  --success: #16a34a;
-  --warning: #d97706;
+  --success: #15803d;
+  --warning: #b45309;
   --danger: #dc2626;
 
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);

@@ -21,6 +21,8 @@
   } from '$lib/stores/download';
   import { addToQueue } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
+  import { classifyError } from '$lib/errors';
+  import { ipc } from '$lib/ipc';
   import { presetsStore, initPresets, setActivePreset } from '$lib/stores/presets';
   import type {
     ConflictMode,
@@ -127,6 +129,28 @@
     selectedIdx = new Set();
     rangePattern = '';
     await probe(urlInput);
+  }
+
+  $: probeHint =
+    state.probe.phase === 'error' ? classifyError(state.probe.error) : null;
+
+  let probeFixBusy = false;
+
+  async function runProbeFix() {
+    if (!probeHint?.action) return;
+    probeFixBusy = true;
+    try {
+      if (probeHint.action === 'reinstall-ffmpeg') {
+        await ipc.installFfmpeg();
+      } else {
+        await ipc.installYtdlp();
+      }
+      await handleProbe();
+    } catch (err) {
+      console.warn('[download] recovery action failed', err);
+    } finally {
+      probeFixBusy = false;
+    }
   }
 
   async function pickFolder() {
@@ -351,8 +375,18 @@
 
     {#if state.probe.phase === 'error'}
       <div class="error-inline">
-        <strong>Couldn't fetch that URL.</strong>
+        <strong>{probeHint?.title ?? "Couldn't fetch that URL."}</strong>
+        {#if probeHint}
+          <span class="hint-text">{probeHint.hint}</span>
+        {/if}
         <code>{state.probe.error}</code>
+        {#if probeHint?.action}
+          <div class="hint-actions">
+            <button class="btn btn-sm" disabled={probeFixBusy} on:click={runProbeFix}>
+              {probeFixBusy ? 'Working…' : probeHint.actionLabel}
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -856,6 +890,16 @@
     white-space: pre-wrap;
     color: inherit;
     opacity: 0.9;
+  }
+
+  .error-inline .hint-text {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--fg-muted);
+  }
+
+  .error-inline .hint-actions {
+    margin-top: 8px;
   }
 
   .added-banner {

@@ -5,29 +5,29 @@ Each phase is its own checkpoint and gets an alpha tag.
 
 ---
 
-## Phase 6a — Content options (next up)
+## Phase 6a — Content options
 
 Playlists, subtitles, SponsorBlock. The "what goes into the file" side of
 yt-dlp configuration.
 
-- [ ] **Playlists**
-  - [ ] Probe command detects `_type == "playlist"` and returns a playlist
+- [x] **Playlists**
+  - [x] Probe command detects `_type == "playlist"` and returns a playlist
         structure with entries (id, title, duration, thumbnail, url).
-  - [ ] Frontend `ProbeResult` becomes a discriminated union
+  - [x] Frontend `ProbeResult` becomes a discriminated union
         (`single` vs `playlist`).
-  - [ ] New `PlaylistView` in DownloadView: checkbox list, select-all,
+  - [x] New `PlaylistView` in DownloadView: checkbox list, select-all,
         range pattern (e.g. `1,3,5-7`), per-item thumbnails.
-  - [ ] "Add N to queue" enqueues each selected entry as its own queue item
+  - [x] "Add N to queue" enqueues each selected entry as its own queue item
         (clean per-item progress, fits existing scheduler).
-- [ ] **Subtitles**
-  - [ ] Probe exposes `availableSubs` + `availableAutoSubs` (lang codes).
-  - [ ] UI: multi-select chips, "embed vs separate file", "include
+- [x] **Subtitles**
+  - [x] Probe exposes `availableSubs` + `availableAutoSubs` (lang codes).
+  - [x] UI: multi-select chips, "embed vs separate file", "include
         auto-generated" toggle. Disabled for audio-only presets.
-  - [ ] Args: `--write-subs`, `--sub-langs <...>`, `--write-auto-subs`,
+  - [x] Args: `--write-subs`, `--sub-langs <...>`, `--write-auto-subs`,
         `--embed-subs`.
-- [ ] **SponsorBlock**
-  - [ ] Off / Mark / Remove radio in advanced options.
-  - [ ] Args: `--sponsorblock-mark all` or `--sponsorblock-remove all`.
+- [x] **SponsorBlock**
+  - [x] Off / Mark / Remove radio in advanced options.
+  - [x] Args: `--sponsorblock-mark all` or `--sponsorblock-remove all`.
 
 **Ship tag:** `v0.3.0-alpha`.
 
@@ -38,20 +38,20 @@ yt-dlp configuration.
 The "how it runs" knobs, plus self-update so end users don't re-download
 installers from GitHub by hand.
 
-- [ ] **Cookies** — dropdown: none / browser (chrome/firefox/edge/brave/…) /
+- [x] **Cookies** — dropdown: none / browser (chrome/firefox/edge/brave/…) /
       cookies.txt file path. Args: `--cookies-from-browser <b>` or
       `--cookies <file>`.
-- [ ] **Rate limit** — text input (e.g. `2M`). Arg: `--limit-rate`.
-- [ ] **Retries / fragment retries** — number inputs. Args: `--retries`,
+- [x] **Rate limit** — text input (e.g. `2M`). Arg: `--limit-rate`.
+- [x] **Retries / fragment retries** — number inputs. Args: `--retries`,
       `--fragment-retries`.
-- [ ] **Output template editor** — textarea with preset buttons
+- [x] **Output template editor** — textarea with preset buttons
       (`%(title)s.%(ext)s`, `%(uploader)s - %(title)s.%(ext)s`, …) and
       a live-preview line computed from the probed metadata.
-- [ ] **File conflicts** — radio: skip / overwrite / auto-number. Args:
+- [x] **File conflicts** — radio: skip / overwrite / auto-number. Args:
       `--no-overwrites` / `--force-overwrites` / yt-dlp's default numbering.
-- [ ] **Embed extras** — toggles for thumbnail, metadata, chapters. Args:
+- [x] **Embed extras** — toggles for thumbnail, metadata, chapters. Args:
       `--embed-thumbnail`, `--embed-metadata`, `--embed-chapters`.
-- [ ] **In-app updater** — `tauri-plugin-updater` pointed at a GitHub
+- [x] **In-app updater** — `tauri-plugin-updater` pointed at a GitHub
       Releases `latest.json` manifest.
   - Generate a signing keypair with `tauri signer generate`.
   - Commit the public key to `tauri.conf.json > plugins.updater.pubkey`.
@@ -67,18 +67,18 @@ installers from GitHub by hand.
 
 ---
 
-## Phase 7a — History & logs (next up)
+## Phase 7a — History & logs
 
 The "what just happened" surface. Pulls log capture out of dev-tools and
 keeps a record after jobs finish.
 
-- [ ] **History** — persisted list of completed downloads (title, path,
+- [x] **History** — persisted list of completed downloads (title, path,
       timestamp, preset, size). Open folder / re-download actions.
       Stored via `tauri-plugin-store`; trimmed to a sane cap.
-- [ ] **Raw log panel** — collapsible per queue item, shows captured
+- [x] **Raw log panel** — collapsible per queue item, shows captured
       stdout/stderr from yt-dlp (`download://log` is already emitted).
       Useful for debugging weird extractor failures.
-- [ ] **Desktop notifications** on job completion via
+- [x] **Desktop notifications** on job completion via
       `tauri-plugin-notification`. Toggle in settings, default on.
 
 **Ship tag:** `v0.5.0-alpha`.
@@ -102,11 +102,11 @@ Reusable configurations and skip-already-downloaded support.
 
 The "feels finished" pass before the v1 push.
 
-- [ ] **Error recovery UI** — surface known patterns ("yt-dlp outdated",
+- [x] **Error recovery UI** — surface known patterns ("yt-dlp outdated",
       "ffmpeg missing", "HTTP 403") with a one-click action.
-- [ ] **Fox theme unlock polish** — tail-wag animation on logo, `:3`
+- [x] **Fox theme unlock polish** — tail-wag animation on logo, `:3`
       toast, persistence verified.
-- [ ] **Light theme** pass — audit all views for contrast / legibility.
+- [x] **Light theme** pass — audit all views for contrast / legibility.
 
 **Ship tag:** `v0.7.0-alpha` (or beta if it feels ready).
 

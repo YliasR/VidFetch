@@ -247,6 +247,34 @@ export async function cancelItem(id: string): Promise<void> {
   void tick();
 }
 
+/** Re-enqueue a failed or canceled item from scratch. */
+export function retryItem(id: string): void {
+  queueStore.update((s) => {
+    const item = s.items.find((i) => i.id === id);
+    if (!item || (item.status !== 'error' && item.status !== 'canceled')) return s;
+    const { [id]: _, ...logs } = s.logs;
+    return {
+      ...s,
+      items: s.items.map((i) =>
+        i.id === id
+          ? {
+              ...i,
+              status: 'queued' as QueueItemStatus,
+              rustId: null,
+              downloaded: 0,
+              total: null,
+              speed: null,
+              eta: null,
+              message: null,
+            }
+          : i
+      ),
+      logs,
+    };
+  });
+  void tick();
+}
+
 export function clearCompleted(): void {
   queueStore.update((s) => {
     const keep = s.items.filter(

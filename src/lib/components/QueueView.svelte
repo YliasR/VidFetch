@@ -9,13 +9,17 @@
     clearCompleted,
     moveItem,
     setConcurrency,
+    retryItem,
     type QueueItem,
     type QueueItemStatus,
   } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
+  import { classifyError, type ErrorHint } from '$lib/errors';
+  import { ipc } from '$lib/ipc';
 
   let initialized = false;
   let logsOpen: Record<string, boolean> = {};
+  let fixBusy: Record<string, boolean> = {};
 
   onMount(async () => {
     if (!initialized) {
@@ -103,6 +107,29 @@
 
   function toggleLog(id: string) {
     logsOpen = { ...logsOpen, [id]: !logsOpen[id] };
+  }
+
+  function hintFor(item: QueueItem): ErrorHint | null {
+    if (item.status !== 'error') return null;
+    const lines = (state.logs[item.id] ?? []).map((l) => l.line);
+    return classifyError(item.message, lines);
+  }
+
+  async function runFix(item: QueueItem, hint: ErrorHint) {
+    if (!hint.action) return;
+    fixBusy = { ...fixBusy, [item.id]: true };
+    try {
+      if (hint.action === 'update-ytdlp' || hint.action === 'install-ytdlp') {
+        await ipc.installYtdlp();
+      } else if (hint.action === 'reinstall-ffmpeg') {
+        await ipc.installFfmpeg();
+      }
+      retryItem(item.id);
+    } catch (err) {
+      console.warn('[queue] recovery action failed', err);
+    } finally {
+      fixBusy = { ...fixBusy, [item.id]: false };
+    }
   }
 </script>
 
@@ -194,6 +221,34 @@
               <pre class="message">{item.message}</pre>
             {/if}
 
+            {#if item.status === 'error'}
+              {@const hint = hintFor(item)}
+              <div class="recovery">
+                {#if hint}
+                  <div class="recovery-text">
+                    <strong>{hint.title}</strong>
+                    <span class="muted">{hint.hint}</span>
+                  </div>
+                {/if}
+                <div class="recovery-actions">
+                  {#if hint?.action}
+                    <button
+                      class="btn btn-primary btn-sm"
+                      disabled={fixBusy[item.id]}
+                      on:click={() => runFix(item, hint)}
+                    >
+                      {fixBusy[item.id] ? 'Working…' : hint.actionLabel}
+                    </button>
+                  {/if}
+                  <button
+                    class="btn btn-sm"
+                    disabled={fixBusy[item.id]}
+                    on:click={() => retryItem(item.id)}
+                  >Retry</button>
+                </div>
+              </div>
+            {/if}
+
             {#if state.logs[item.id]?.length}
               <button class="log-toggle" on:click={() => toggleLog(item.id)}>
                 {logsOpen[item.id] ? '▾' : '▸'} Log ({state.logs[item.id].length})
@@ -226,6 +281,9 @@
               <button class="icon-btn" title="Open folder" on:click={() => openFolder(item)}>📁</button>
               <button class="icon-btn" title="Remove" on:click={() => removeFromQueue(item.id)}>✕</button>
             {:else}
+              {#if item.status === 'canceled'}
+                <button class="icon-btn" title="Retry" on:click={() => retryItem(item.id)}>↻</button>
+              {/if}
               <button class="icon-btn" title="Remove" on:click={() => removeFromQueue(item.id)}>✕</button>
             {/if}
           </div>
@@ -455,6 +513,33 @@
     color: var(--fg-muted);
     max-height: 100px;
     overflow: auto;
+  }
+
+  .recovery {
+    margin-top: 4px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--warning) 8%, var(--surface-2));
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .recovery-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12.5px;
+  }
+
+  .recovery-text strong {
+    font-size: 12.5px;
+  }
+
+  .recovery-actions {
+    display: flex;
+    gap: 8px;
   }
 
   .log-toggle {
