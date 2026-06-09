@@ -1,6 +1,6 @@
 # VidFetch Roadmap
 
-Phases 1–7b shipped (current: `v0.6.0-alpha`). Remaining work is grouped below.
+Phases 1–7c shipped (current: `v0.7.0-alpha`). Remaining work is grouped below.
 Each phase is its own checkpoint and gets an alpha tag.
 
 ---
