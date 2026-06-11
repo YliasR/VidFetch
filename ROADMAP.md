@@ -1,6 +1,6 @@
 # VidFetch Roadmap
 
-Phases 1–8 shipped (current: `v1.0.0`). Remaining work is grouped below.
+Phases 1–8 plus the v1.1/v1.2 point releases shipped (current: `v1.2.0`). Remaining work is grouped below.
 Each phase is its own checkpoint and gets an alpha tag.
 
 ---
@@ -155,30 +155,30 @@ Smaller, focused improvements that ride on top of the v1.0 foundation.
 
 ## v1.1 — Queue polish
 
-- [ ] **Playlist groups** — a set of entries added together from one
+- [x] **Playlist groups** — a set of entries added together from one
       playlist probe collapses into a single queue row that expands to
       show per-item progress. Bulk cancel / remove at the group level.
-- [ ] **Pause/resume on running jobs** — Windows
+- [x] **Pause/resume on running jobs** — Windows
       `NtSuspendProcess` / `NtResumeProcess` via the `windows` crate;
       Unix `SIGSTOP` / `SIGCONT`. Exposed as a pause icon on active
       queue items.
-- [ ] **Queue persistence across restarts** — save pending + queued
+- [x] **Queue persistence across restarts** — save pending + queued
       items to LazyStore on mutation; on boot, requeue as `queued`
       (running jobs die with the process, so they go back to queued).
 
-**Ship tag:** `v1.1.0`.
+**Ship tag:** shipped together with v1.2 as `v1.2.0`.
 
 ## v1.2 — Power-user UX
 
-- [ ] **Format browser** — full table of formats returned by
+- [x] **Format browser** — full table of formats returned by
       `yt-dlp -J` (resolution, fps, codec, ext, size, bitrate). Click a
       row to pick that exact format instead of a preset. Preset stays
       the default; this is an opt-in "Advanced" toggle.
-- [ ] **Clipboard auto-paste** — watch the clipboard for a URL whose
+- [x] **Clipboard auto-paste** — watch the clipboard for a URL whose
       extractor yt-dlp recognizes; offer a one-click "Fetch the URL you
       just copied" button on the Download view. Uses
       `tauri-plugin-clipboard-manager`.
-- [ ] **Drag-and-drop URLs** — drop a text file or URL directly onto
+- [x] **Drag-and-drop URLs** — drop a text file or URL directly onto
       the window to enqueue.
 
 **Ship tag:** `v1.2.0`.
