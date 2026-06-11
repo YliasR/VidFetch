@@ -190,6 +190,11 @@ ffmpeg is already bundled, so no new binary deps — but the UX gets a
 new top-level **Edit** tab alongside Download / Queue, with a
 per-clip timeline view. Each v2.x release adds one slice of editing.
 
+Each phase is testable before its stable tag via the **nightly
+channel**: run the Nightly workflow (`workflow_dispatch`, any branch)
+to publish a rolling prerelease; users opt in via Settings → Update
+channel → Nightly.
+
 ## v2.0 — GIF pipeline
 
 - [ ] **Video → GIF export** — pick a downloaded video (or any local

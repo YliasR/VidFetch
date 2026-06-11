@@ -1,21 +1,28 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { getVersion } from '@tauri-apps/api/app';
-  import { check, type Update } from '@tauri-apps/plugin-updater';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { openUrl } from '@tauri-apps/plugin-opener';
-  import { ipc, type Versions } from '$lib/ipc';
+  import { ipc, type Versions, type UpdateInfo } from '$lib/ipc';
   import {
     notifPrefs,
     initNotifications,
     setNotificationsEnabled,
   } from '$lib/stores/notifications';
+  import {
+    updateChannel,
+    initUpdateChannel,
+    setUpdateChannel,
+    currentChannel,
+    type UpdateChannel,
+  } from '$lib/stores/updates';
 
   type UpdateState =
     | { phase: 'idle' }
     | { phase: 'checking' }
     | { phase: 'up-to-date' }
-    | { phase: 'available'; update: Update }
+    | { phase: 'available'; update: UpdateInfo }
     | { phase: 'downloading'; downloaded: number; total: number | null }
     | { phase: 'installing' }
     | { phase: 'done' }
@@ -26,6 +33,7 @@
   let versions: Versions = { ytdlp: null, ffmpeg: null };
   let ytdlpBusy = false;
   let ytdlpError: string | null = null;
+  let unlistenProgress: UnlistenFn | null = null;
 
   onMount(async () => {
     try {
@@ -34,8 +42,32 @@
       appVersion = '?';
     }
     await initNotifications();
+    await initUpdateChannel();
     await refreshBinaryVersions();
+    unlistenProgress = await listen<{ downloaded: number; total: number | null }>(
+      'updater://progress',
+      (e) => {
+        if (updateState.phase === 'downloading') {
+          updateState = {
+            phase: 'downloading',
+            downloaded: e.payload.downloaded,
+            total: e.payload.total,
+          };
+        }
+      }
+    );
   });
+
+  onDestroy(() => {
+    if (unlistenProgress) unlistenProgress();
+  });
+
+  async function onChannelChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value as UpdateChannel;
+    await setUpdateChannel(value);
+    // A channel switch invalidates whatever the last check found.
+    updateState = { phase: 'idle' };
+  }
 
   async function onToggleNotifications(e: Event) {
     const checked = (e.target as HTMLInputElement).checked;
@@ -53,7 +85,7 @@
   async function checkForUpdates() {
     updateState = { phase: 'checking' };
     try {
-      const update = await check();
+      const update = await ipc.checkAppUpdate(currentChannel());
       if (!update) {
         updateState = { phase: 'up-to-date' };
       } else {
@@ -66,24 +98,10 @@
 
   async function installUpdate() {
     if (updateState.phase !== 'available') return;
-    const update = updateState.phase === 'available' ? updateState.update : null;
-    if (!update) return;
 
     updateState = { phase: 'downloading', downloaded: 0, total: null };
     try {
-      let downloaded = 0;
-      let total: number | null = null;
-      await update.downloadAndInstall((event) => {
-        if (event.event === 'Started') {
-          total = event.data.contentLength ?? null;
-          updateState = { phase: 'downloading', downloaded: 0, total };
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          updateState = { phase: 'downloading', downloaded, total };
-        } else if (event.event === 'Finished') {
-          updateState = { phase: 'installing' };
-        }
-      });
+      await ipc.installAppUpdate(currentChannel());
       updateState = { phase: 'done' };
       await relaunch();
     } catch (err) {
@@ -160,8 +178,27 @@
       </div>
     </div>
 
+    <div class="row channel-row">
+      <div class="label-col">
+        <div class="label">Update channel</div>
+        <div class="value muted small">
+          {#if $updateChannel === 'nightly'}
+            Pre-release builds of upcoming features. Expect rough edges.
+          {:else}
+            Tagged releases only.
+          {/if}
+        </div>
+      </div>
+      <div class="action-col">
+        <select class="input channel-select" value={$updateChannel} on:change={onChannelChange}>
+          <option value="stable">Stable</option>
+          <option value="nightly">Nightly</option>
+        </select>
+      </div>
+    </div>
+
     {#if updateState.phase === 'up-to-date'}
-      <p class="muted small status">You're on the latest version.</p>
+      <p class="muted small status">You're on the latest {$updateChannel} version.</p>
     {:else if updateState.phase === 'available'}
       <div class="update-notes">
         <div class="update-head">
@@ -447,5 +484,21 @@
   .switch input:checked + .slider::before {
     transform: translate(20px, -50%);
     background: var(--accent-fg);
+  }
+
+  .channel-row {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .channel-select {
+    min-width: 120px;
+    padding: 7px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg);
+    font-size: 13px;
   }
 </style>

@@ -1,0 +1,103 @@
+name: Nightly
+
+# Manually triggered: pick any branch (e.g. a v2 phase branch) and run.
+# Publishes a rolling prerelease at the fixed `nightly` tag that the
+# in-app "Nightly" update channel points to. Marked prerelease, so the
+# stable channel (/releases/latest/) never sees it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Drop the previous nightly so assets from older builds don't pile up
+  # (filenames embed the version, so they would never be overwritten).
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete previous nightly release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+
+  build:
+    needs: cleanup
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-14
+            args: '--target universal-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl \
+            wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Stamp nightly version
+        id: stamp
+        shell: bash
+        run: |
+          # Base = current config version with any prerelease stripped, then
+          # patch+1 so the nightly always sorts above the released stable
+          # (1.2.0 -> 1.2.1-nightly.X) and below the next stable.
+          BASE=$(jq -r '.version' src-tauri/tauri.conf.json)
+          BASE=${BASE%%-*}
+          IFS=. read -r MAJOR MINOR PATCH <<< "$BASE"
+          NIGHTLY="$MAJOR.$MINOR.$((PATCH + 1))-nightly.$(date -u +%Y%m%d).$(git rev-parse --short HEAD)"
+          jq --arg v "$NIGHTLY" '.version = $v' src-tauri/tauri.conf.json > tauri.conf.tmp
+          mv tauri.conf.tmp src-tauri/tauri.conf.json
+          echo "version=$NIGHTLY" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: $NIGHTLY"
+
+      - name: Build and publish nightly
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: nightly
+          releaseName: 'VidFetch Nightly'
+          releaseBody: |
+            Rolling nightly build — `${{ steps.stamp.outputs.version }}` from `${{ github.ref_name }}` @ ${{ github.sha }}.
+
+            These builds exist to test upcoming features and **will** have rough edges.
+            Switch the update channel to *Nightly* in Settings to receive them in-app,
+            or back to *Stable* to stop. Please report anything broken.
+          releaseDraft: false
+          prerelease: true
+          args: ${{ matrix.args }}

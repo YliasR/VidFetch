@@ -12,6 +12,12 @@ export interface Versions {
   ffmpeg: string | null;
 }
 
+export interface UpdateInfo {
+  version: string;
+  body: string | null;
+  date: string | null;
+}
+
 export interface InstallProgress {
   target: 'ytdlp' | 'ffmpeg';
   phase: 'fetching' | 'downloading' | 'extracting' | 'done';
@@ -33,4 +39,9 @@ export const ipc = {
   pauseDownload: (id: string) => invoke<boolean>('pause_download', { id }),
   resumeDownload: (id: string) => invoke<boolean>('resume_download', { id }),
   readDroppedText: (path: string) => invoke<string>('read_dropped_text', { path }),
+
+  checkAppUpdate: (channel: string) =>
+    invoke<UpdateInfo | null>('check_app_update', { channel }),
+  installAppUpdate: (channel: string) =>
+    invoke<void>('install_app_update', { channel }),
 };

@@ -57,6 +57,8 @@ It also **manages yt-dlp for you**: on first launch it downloads the latest yt-d
 
 ## Install
 
+> **Nightly builds:** want to test upcoming features (like the v2 GIF/editing work) before they're released? Switch **Settings → Update channel → Nightly** in the app. Stable is the default and never receives pre-release builds.
+
 ### Windows
 
 Grab the latest `VidFetch_x.y.z_x64-setup.exe` from the [Releases page](../../releases) and run it. The installer is not yet code-signed, so SmartScreen will show a warning on first run — click **More info → Run anyway**.
