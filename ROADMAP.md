@@ -209,6 +209,11 @@ channel end-to-end with a small surface area.
 
 ## Nightly 2 — GIF pipeline (rest)
 
+- [ ] **GIF as a download format** — offer GIF in the Download view's
+      output options: yt-dlp fetches the video, then the existing
+      two-pass GIF pipeline converts it as a post-step (reusing the
+      Edit tab's trim/width/fps/dither settings). Queue progress shows
+      a distinct "converting to GIF" phase.
 - [ ] **Import existing GIF** — drop a `.gif` into the Edit tab to
       load it as a source clip (treated the same as a video internally).
 - [ ] **Re-edit imported GIF** — trim, resize, frame-drop to lower fps,
