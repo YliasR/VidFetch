@@ -167,8 +167,24 @@ installer.rs  Downloads platform-specific yt-dlp + ffmpeg static builds with
   variables; views keep layout-specific styles in their own `<style>`.
 - **Releases:** stable = tag `vX.Y.Z` → `release.yml`; nightly = run
   `nightly.yml` manually from any branch (version is auto-stamped).
+- **Release notes are mandatory.** Every GitHub release page (stable *and*
+  nightly) must get a real changelog: what's new, what changed, what's
+  fixed — written for end users, not commit-message dumps. Do this without
+  being asked; an empty or placeholder release body is a bug. For nightlies,
+  edit the rolling `nightly` release body (`gh release edit nightly --notes`)
+  after the workflow publishes, since the workflow only writes a generic
+  template.
 - **ROADMAP.md** is the source of truth for scope; tick checkboxes when a
   feature lands.
+
+## Dev environment
+
+- The main dev machine is **Windows 11** (PowerShell; MinGW/MSYS2 available).
+  Assume Windows paths and test there first.
+- A **macOS** machine and a **Linux** PC are also available for
+  platform-specific testing — ask the user to run things there when a change
+  touches platform-conditional code (`cfg(windows)` / `cfg(unix)`, installers,
+  window chrome) rather than shipping it blind.
 
 ## Verification
 
