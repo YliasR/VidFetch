@@ -5,6 +5,7 @@
   const items: { id: View; label: string; icon: string }[] = [
     { id: 'download', label: 'Download', icon: '↓' },
     { id: 'queue', label: 'Queue', icon: '≡' },
+    { id: 'edit', label: 'Edit', icon: '✂' },
     { id: 'history', label: 'History', icon: '⟲' },
     { id: 'presets', label: 'Presets', icon: '★' },
     { id: 'settings', label: 'Settings', icon: '⚙' },

@@ -34,6 +34,9 @@ pub fn run() {
             commands::download::pause_download,
             commands::download::resume_download,
             commands::files::read_dropped_text,
+            commands::edit::probe_media,
+            commands::edit::export_gif,
+            commands::edit::cancel_export,
             commands::updater::check_app_update,
             commands::updater::install_app_update,
         ])

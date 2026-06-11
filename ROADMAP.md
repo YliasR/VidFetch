@@ -183,24 +183,32 @@ Smaller, focused improvements that ride on top of the v1.0 foundation.
 
 **Ship tag:** `v1.2.0`.
 
-# v2.0 and beyond — GIFs & video editing
+# v2 — GIFs & video editing
 
 This is the pivot from "yt-dlp GUI" to "yt-dlp + tiny video studio."
 ffmpeg is already bundled, so no new binary deps — but the UX gets a
 new top-level **Edit** tab alongside Download / Queue, with a
-per-clip timeline view. Each v2.x release adds one slice of editing.
+per-clip timeline view.
 
-Each phase is testable before its stable tag via the **nightly
-channel**: run the Nightly workflow (`workflow_dispatch`, any branch)
-to publish a rolling prerelease; users opt in via Settings → Update
-channel → Nightly.
+All v2 work ships as **nightly phases**: each phase lands on the
+nightly channel only (run the Nightly workflow — `workflow_dispatch`,
+any branch — to publish a rolling prerelease; users opt in via
+Settings → Update channel → Nightly). There are no intermediate stable
+tags — once every phase below is done and soaked on nightly, the whole
+thing ships at once as the single public `v2.0.0` release.
 
-## v2.0 — GIF pipeline
+## Nightly 1 — GIF export
 
-- [ ] **Video → GIF export** — pick a downloaded video (or any local
+The first nightly ships exactly one feature, to prove out the nightly
+channel end-to-end with a small surface area.
+
+- [x] **Video → GIF export** — pick a downloaded video (or any local
       file), trim the range, tweak width / fps / dithering. Two-pass
       `ffmpeg -vf palettegen` then `-lavfi paletteuse` for clean
       palettes. Progress streamed the same way download progress is.
+
+## Nightly 2 — GIF pipeline (rest)
+
 - [ ] **Import existing GIF** — drop a `.gif` into the Edit tab to
       load it as a source clip (treated the same as a video internally).
 - [ ] **Re-edit imported GIF** — trim, resize, frame-drop to lower fps,
@@ -209,22 +217,17 @@ channel → Nightly.
       range from a video onto the end (or front) with a matched
       palette to avoid color-wash.
 
-**Ship tag:** `v2.0.0`.
-
-## v2.1 — Trim & cut
+## Nightly 3 — Trim & cut
 
 - [ ] **Single-file trim** — pick start/end on a video scrubber, write
       the cut. Use `-c copy` when both cuts land on keyframes, re-encode
       otherwise (show user a "lossless / re-encoded" badge).
 - [ ] **Multi-range trim** — pick N ranges from a single source and
-      export them as separate files, or concat them into one (hand-off
-      to v2.2).
+      export them as separate files, or concat them into one.
 - [ ] **Scrub preview** — lightweight ffmpeg thumbnail generation
       along the timeline so the user isn't trimming blind.
 
-**Ship tag:** `v2.1.0`.
-
-## v2.2 — Multi-clip concat
+## Nightly 4 — Multi-clip concat
 
 - [ ] **Drag-and-drop clip list** — order a list of local files in the
       Edit tab, preview the sequence, write a single output.
@@ -233,9 +236,7 @@ channel → Nightly.
 - [ ] **Slow path** (mixed sources) — concat filter with an ffmpeg
       normalize pass so resolution/fps/audio-rate match.
 
-**Ship tag:** `v2.2.0`.
-
-## v2.3 — Audio ops
+## Nightly 5 — Audio ops
 
 - [ ] **Remove audio** — passthrough encode with `-an`.
 - [ ] **Replace audio** — pick a local audio file, align to video
@@ -245,9 +246,7 @@ channel → Nightly.
       (shares the yt-dlp audio-preset code path).
 - [ ] **Volume adjust** — simple dB slider with waveform preview.
 
-**Ship tag:** `v2.3.0`.
-
-## v2.4 — Transforms
+## Nightly 6 — Transforms
 
 - [ ] **Rotate / flip** — 90° rotations + horizontal/vertical flip.
 - [ ] **Crop** — rectangle selector overlaid on a preview frame.
@@ -256,7 +255,12 @@ channel → Nightly.
 - [ ] **Speed** — change playback speed with audio pitch preserved
       (`atempo` chain for audio, `setpts` for video).
 
-**Ship tag:** `v2.4.0`.
+## v2.0 — Public release
+
+- [ ] All nightly phases above complete and soaked on the nightly
+      channel; fix what testing shook out.
+
+**Ship tag:** `v2.0.0` (the only stable tag in the v2 line).
 
 ---
 

@@ -212,7 +212,7 @@ fn signal_process(pid: u32, signal: i32) -> anyhow::Result<()> {
 }
 
 #[cfg(windows)]
-fn kill_windows(pid: u32) {
+pub(crate) fn kill_windows(pid: u32) {
     // Hard-kill the child by PID. Safer than signaling and saves us wiring
     // a dedicated channel from the runner task for v1.
     unsafe {
