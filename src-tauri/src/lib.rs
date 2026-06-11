@@ -17,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             app.manage(AppState::default());
             paths::ensure_app_dirs(&app.handle())?;
@@ -32,6 +33,7 @@ pub fn run() {
             commands::download::cancel_download,
             commands::download::pause_download,
             commands::download::resume_download,
+            commands::files::read_dropped_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

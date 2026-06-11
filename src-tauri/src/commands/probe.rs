@@ -25,6 +25,22 @@ pub struct VideoInfo {
     pub is_live: Option<bool>,
     pub available_subs: Vec<String>,
     pub available_auto_subs: Vec<String>,
+    pub formats: Vec<FormatInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormatInfo {
+    pub format_id: String,
+    pub ext: String,
+    pub resolution: Option<String>,
+    pub height: Option<u64>,
+    pub fps: Option<f64>,
+    pub vcodec: Option<String>,
+    pub acodec: Option<String>,
+    pub filesize: Option<u64>,
+    pub tbr: Option<f64>,
+    pub format_note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -126,7 +142,59 @@ fn parse_video(json: &Value) -> VideoInfo {
         is_live: json.get("is_live").and_then(|v| v.as_bool()),
         available_subs: subtitle_langs(json, "subtitles"),
         available_auto_subs: subtitle_langs(json, "automatic_captions"),
+        formats: parse_formats(json),
     }
+}
+
+fn parse_formats(json: &Value) -> Vec<FormatInfo> {
+    let Some(arr) = json.get("formats").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|f| {
+            let format_id = f.get("format_id").and_then(|v| v.as_str())?.to_string();
+            let ext = f
+                .get("ext")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let vcodec = codec_field(f, "vcodec");
+            let acodec = codec_field(f, "acodec");
+            // Storyboards and other non-media pseudo-formats have no codecs.
+            if ext == "mhtml" || (vcodec.is_none() && acodec.is_none()) {
+                return None;
+            }
+            Some(FormatInfo {
+                format_id,
+                ext,
+                resolution: f
+                    .get("resolution")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                height: f.get("height").and_then(|v| v.as_u64()),
+                fps: f.get("fps").and_then(|v| v.as_f64()),
+                vcodec,
+                acodec,
+                filesize: f
+                    .get("filesize")
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| f.get("filesize_approx").and_then(|v| v.as_u64())),
+                tbr: f.get("tbr").and_then(|v| v.as_f64()),
+                format_note: f
+                    .get("format_note")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            })
+        })
+        .collect()
+}
+
+/// Normalize yt-dlp codec fields: the literal string "none" means absent.
+fn codec_field(f: &Value, key: &str) -> Option<String> {
+    f.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty() && *s != "none")
+        .map(String::from)
 }
 
 fn parse_playlist(json: &Value) -> PlaylistInfo {

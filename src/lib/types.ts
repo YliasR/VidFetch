@@ -9,6 +9,20 @@ export interface VideoInfo {
   isLive: boolean | null;
   availableSubs: string[];
   availableAutoSubs: string[];
+  formats: FormatInfo[];
+}
+
+export interface FormatInfo {
+  formatId: string;
+  ext: string;
+  resolution: string | null;
+  height: number | null;
+  fps: number | null;
+  vcodec: string | null;
+  acodec: string | null;
+  filesize: number | null;
+  tbr: number | null;
+  formatNote: string | null;
 }
 
 export interface PlaylistEntry {
@@ -74,6 +88,9 @@ export interface DownloadOptions {
 
   outputFormat?: OutputFormat;
   downloadArchive?: string | null;
+
+  /** Exact -f selector from the format browser; overrides the preset. */
+  formatSelector?: string | null;
 }
 
 export type DownloadStatusKind =

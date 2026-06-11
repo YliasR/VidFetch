@@ -32,4 +32,5 @@ export const ipc = {
   cancelDownload: (id: string) => invoke<boolean>('cancel_download', { id }),
   pauseDownload: (id: string) => invoke<boolean>('pause_download', { id }),
   resumeDownload: (id: string) => invoke<boolean>('resume_download', { id }),
+  readDroppedText: (path: string) => invoke<string>('read_dropped_text', { path }),
 };

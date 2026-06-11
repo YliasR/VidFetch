@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { readText } from '@tauri-apps/plugin-clipboard-manager';
   import {
     downloadStore,
     initDownload,
@@ -28,6 +29,7 @@
     ConflictMode,
     CookiesSource,
     DownloadOptions,
+    FormatInfo,
     OutputFormat,
     PlaylistEntry,
     QualityPreset,
@@ -41,6 +43,47 @@
   let lastAdded: { title: string; count: number } | null = null;
   let advancedOpen = false;
 
+  // Format browser — exact -f pick that overrides the quality preset.
+  let formatBrowserOpen = false;
+  let selectedFormat: FormatInfo | null = null;
+  let formatForVideoId: string | null = null;
+
+  // Clipboard watcher — offer to fetch a URL the user just copied.
+  let clipboardSuggestion: string | null = null;
+  let dismissedClipboard: string | null = null;
+  let clipboardTimer: ReturnType<typeof setInterval> | null = null;
+
+  const CLIPBOARD_URL_RE = /^https?:\/\/\S+$/i;
+
+  async function checkClipboard() {
+    try {
+      const text = ((await readText()) ?? '').trim();
+      if (!text || text.length > 2000 || !CLIPBOARD_URL_RE.test(text)) return;
+      if (text === dismissedClipboard) return;
+      if (text === urlInput.trim() || text === state.probe.url) return;
+      clipboardSuggestion = text;
+    } catch {
+      // Clipboard empty or holding non-text content — nothing to offer.
+    }
+  }
+
+  function acceptClipboard() {
+    if (!clipboardSuggestion) return;
+    urlInput = clipboardSuggestion;
+    dismissedClipboard = clipboardSuggestion;
+    clipboardSuggestion = null;
+    void handleProbe();
+  }
+
+  function dismissClipboard() {
+    dismissedClipboard = clipboardSuggestion;
+    clipboardSuggestion = null;
+  }
+
+  onDestroy(() => {
+    if (clipboardTimer) clearInterval(clipboardTimer);
+  });
+
   // Playlist selection state — tracked locally, reset on each probe.
   let selectedIdx = new Set<number>();
   let rangePattern = '';
@@ -52,6 +95,8 @@
       await initPresets();
       initialized = true;
     }
+    void checkClipboard();
+    clipboardTimer = setInterval(checkClipboard, 2000);
   });
 
   const presets: { id: QualityPreset; label: string; note: string }[] = [
@@ -111,6 +156,49 @@
     } else if (!playlist) {
       autoSelectedForPlaylistId = null;
     }
+  }
+
+  $: {
+    // Drop the format pick whenever a different video (or none) is probed.
+    const id = single?.id ?? null;
+    if (id !== formatForVideoId) {
+      formatForVideoId = id;
+      selectedFormat = null;
+      formatBrowserOpen = false;
+    }
+  }
+
+  $: sortedFormats = single ? sortFormats(single.formats) : [];
+
+  function sortFormats(formats: FormatInfo[]): FormatInfo[] {
+    // Video formats first (highest resolution → lowest), audio-only after.
+    return [...formats].sort((a, b) => {
+      const aVideo = a.vcodec != null;
+      const bVideo = b.vcodec != null;
+      if (aVideo !== bVideo) return aVideo ? -1 : 1;
+      const h = (b.height ?? 0) - (a.height ?? 0);
+      if (h !== 0) return h;
+      const fps = (b.fps ?? 0) - (a.fps ?? 0);
+      if (fps !== 0) return fps;
+      return (b.tbr ?? 0) - (a.tbr ?? 0);
+    });
+  }
+
+  /** Video-only picks get best audio merged in; everything else is exact. */
+  function selectorFor(f: FormatInfo): string {
+    if (f.vcodec && !f.acodec) return `${f.formatId}+bestaudio/${f.formatId}`;
+    return f.formatId;
+  }
+
+  function pickFormat(f: FormatInfo) {
+    selectedFormat = selectedFormat?.formatId === f.formatId ? null : f;
+  }
+
+  function fmtSize(bytes: number | null): string {
+    if (bytes == null || bytes <= 0) return '—';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   function formatDuration(seconds: number | null): string {
@@ -189,6 +277,7 @@
         activeSavedPreset?.archiveEnabled && activeSavedPreset.archivePath
           ? activeSavedPreset.archivePath
           : null,
+      formatSelector: selectedFormat ? selectorFor(selectedFormat) : null,
     };
   }
 
@@ -377,6 +466,16 @@
       </button>
     </div>
 
+    {#if clipboardSuggestion && state.probe.phase !== 'probing'}
+      <div class="clip-suggest">
+        <span class="clip-text" title={clipboardSuggestion}>
+          📋 You copied <span class="num">{clipboardSuggestion}</span>
+        </span>
+        <button class="btn btn-primary small" on:click={acceptClipboard}>Fetch it</button>
+        <button class="btn btn-ghost small" title="Dismiss" on:click={dismissClipboard}>✕</button>
+      </div>
+    {/if}
+
     {#if state.probe.phase === 'error'}
       <div class="error-inline">
         <strong>{probeHint?.title ?? "Couldn't fetch that URL."}</strong>
@@ -431,6 +530,66 @@
       </div>
       <button class="btn btn-ghost reset" on:click={clearAndReset} title="Clear">✕</button>
     </div>
+
+    {#if single.formats.length > 0}
+      <div class="card fmt-card">
+        <button
+          class="advanced-toggle"
+          on:click={() => (formatBrowserOpen = !formatBrowserOpen)}
+          aria-expanded={formatBrowserOpen}
+        >
+          <span class="chevron" class:open={formatBrowserOpen}>▸</span>
+          <span>Format browser</span>
+          {#if selectedFormat}
+            <span class="fmt-pill num">-f {selectorFor(selectedFormat)}</span>
+          {/if}
+        </button>
+
+        {#if formatBrowserOpen}
+          <p class="muted small fmt-note">
+            Pick an exact format instead of the quality preset. Video-only rows get the best audio merged in.
+          </p>
+          <div class="fmt-table-wrap">
+            <table class="fmt-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Ext</th>
+                  <th>Resolution</th>
+                  <th>FPS</th>
+                  <th>Video codec</th>
+                  <th>Audio codec</th>
+                  <th>Bitrate</th>
+                  <th>Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each sortedFormats as f (f.formatId)}
+                  <tr
+                    class:selected={selectedFormat?.formatId === f.formatId}
+                    on:click={() => pickFormat(f)}
+                  >
+                    <td class="num">{f.formatId}</td>
+                    <td>{f.ext}</td>
+                    <td class="num">{f.resolution ?? (f.vcodec ? '—' : 'audio only')}</td>
+                    <td class="num">{f.fps ? Math.round(f.fps) : '—'}</td>
+                    <td>{f.vcodec ?? '—'}</td>
+                    <td>{f.acodec ?? '—'}</td>
+                    <td class="num">{f.tbr ? `${Math.round(f.tbr)} kbps` : '—'}</td>
+                    <td class="num">{fmtSize(f.filesize)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          {#if selectedFormat}
+            <button class="btn btn-ghost small" on:click={() => (selectedFormat = null)}>
+              Clear pick — use quality preset
+            </button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
   {/if}
 
   {#if playlist}
@@ -1494,5 +1653,98 @@
     gap: 10px;
     justify-content: flex-end;
     margin-top: 4px;
+  }
+
+  .fmt-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .clip-suggest {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-radius: 8px;
+    font-size: 12.5px;
+  }
+
+  .clip-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fmt-pill {
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .fmt-note {
+    margin: 0;
+  }
+
+  .fmt-table-wrap {
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .fmt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .fmt-table th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-2);
+    text-align: left;
+    padding: 7px 10px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--fg-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .fmt-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  .fmt-table tbody tr {
+    cursor: pointer;
+  }
+
+  .fmt-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  .fmt-table tbody tr.selected {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+
+  .fmt-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 </style>

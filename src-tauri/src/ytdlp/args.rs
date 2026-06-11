@@ -50,6 +50,12 @@ pub struct DownloadOptions {
     pub output_format: OutputFormat,
     #[serde(default)]
     pub download_archive: Option<String>,
+
+    /// Exact `-f` selector picked in the format browser. When set, it
+    /// overrides the preset-derived selector (everything else — container,
+    /// subtitles, embedding — still applies).
+    #[serde(default)]
+    pub format_selector: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -194,9 +200,17 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
         ConflictMode::Overwrite => args.push("--force-overwrites".into()),
     }
 
-    // Format selection.
+    // Format selection — an explicit format-browser pick wins over the preset.
     args.push("-f".into());
-    args.push(build_format_selector(opts.preset, opts.output_format));
+    let custom = opts
+        .format_selector
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    args.push(match custom {
+        Some(selector) => selector.to_string(),
+        None => build_format_selector(opts.preset, opts.output_format),
+    });
 
     // Audio-only post-processing.
     if opts.preset.is_audio_only() {
