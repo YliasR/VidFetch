@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { LazyStore } from '@tauri-apps/plugin-store';
 import { ipc } from '$lib/ipc';
 import type {
   DownloadLogEvent,
@@ -15,6 +16,7 @@ export type QueueItemStatus =
   | 'queued'
   | 'starting'
   | 'downloading'
+  | 'paused'
   | 'postprocess'
   | 'done'
   | 'error'
@@ -34,6 +36,12 @@ export interface QueueLogLine {
 
 const MAX_LOG_LINES_PER_ITEM = 800;
 
+/** Items enqueued together from one playlist probe share a group. */
+export interface QueueItemGroup {
+  id: string;
+  title: string;
+}
+
 export interface QueueItem {
   id: string;
   rustId: string | null;
@@ -46,6 +54,7 @@ export interface QueueItem {
   eta: number | null;
   message: string | null;
   addedAt: number;
+  group: QueueItemGroup | null;
 }
 
 interface QueueState {
@@ -68,6 +77,7 @@ export const activeCount = derived(queueStore, ($q) =>
       i.status === 'queued' ||
       i.status === 'starting' ||
       i.status === 'downloading' ||
+      i.status === 'paused' ||
       i.status === 'postprocess'
   ).length
 );
@@ -76,6 +86,61 @@ let listenersInstalled = false;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenProgress: UnlistenFn | null = null;
 let unlistenLog: UnlistenFn | null = null;
+
+const PERSIST_FILE = 'settings.json';
+const PERSIST_KEY = 'queue';
+const persisted = new LazyStore(PERSIST_FILE);
+
+interface PersistedQueue {
+  items: QueueItem[];
+  concurrency: number;
+}
+
+/**
+ * Persist the queue snapshot. Called on structural mutations (add / remove /
+ * status change / reorder) but never on progress ticks. Logs and live rust
+ * job ids are intentionally not persisted — they don't survive the process.
+ */
+async function saveQueue(): Promise<void> {
+  try {
+    const s = get(queueStore);
+    const items = s.items.map((i) => ({ ...i, rustId: null }));
+    await persisted.set(PERSIST_KEY, { items, concurrency: s.concurrency } satisfies PersistedQueue);
+    await persisted.save();
+  } catch (err) {
+    console.warn('[queue] save failed', err);
+  }
+}
+
+async function loadQueue(): Promise<void> {
+  try {
+    const saved = await persisted.get<PersistedQueue>(PERSIST_KEY);
+    if (!saved || !Array.isArray(saved.items)) return;
+    // Anything that was in flight died with the previous process: requeue it.
+    const items: QueueItem[] = saved.items.map((i) => {
+      const base = { ...i, rustId: null, group: i.group ?? null };
+      const terminal = i.status === 'done' || i.status === 'error' || i.status === 'canceled';
+      return terminal
+        ? base
+        : {
+            ...base,
+            status: 'queued' as QueueItemStatus,
+            downloaded: 0,
+            total: null,
+            speed: null,
+            eta: null,
+            message: null,
+          };
+    });
+    const concurrency =
+      typeof saved.concurrency === 'number'
+        ? Math.max(1, Math.min(5, Math.floor(saved.concurrency)))
+        : initial.concurrency;
+    queueStore.update((s) => ({ ...s, items, concurrency }));
+  } catch (err) {
+    console.warn('[queue] load failed', err);
+  }
+}
 
 function newId(): string {
   return `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -91,11 +156,13 @@ export async function initQueue(): Promise<void> {
 
   await initHistory();
   await initNotifications();
+  await loadQueue();
 
   unlistenStatus = await listen<DownloadStatusEvent>('download://status', (e) => {
     const payload = e.payload;
     let completed: QueueItem | null = null;
     let failed: QueueItem | null = null;
+    let changed = false;
 
     queueStore.update((s) => ({
       ...s,
@@ -106,6 +173,7 @@ export async function initQueue(): Promise<void> {
           status: mapStatus(payload.status),
           message: payload.message ?? item.message,
         };
+        if (next.status !== item.status) changed = true;
         if (next.status === 'done' && item.status !== 'done') completed = next;
         if (next.status === 'error' && item.status !== 'error') failed = next;
         return next;
@@ -118,6 +186,9 @@ export async function initQueue(): Promise<void> {
     if (failed) {
       const f = failed as QueueItem;
       void notifyJobDone('Download failed', f.display.title);
+    }
+    if (changed) {
+      void saveQueue();
     }
 
     void tick();
@@ -194,6 +265,7 @@ export async function disposeQueue(): Promise<void> {
 export function addToQueue(params: {
   options: DownloadOptions;
   display: QueueItemDisplay;
+  group?: QueueItemGroup | null;
 }): string {
   const item: QueueItem = {
     id: newId(),
@@ -207,10 +279,16 @@ export function addToQueue(params: {
     eta: null,
     message: null,
     addedAt: Date.now(),
+    group: params.group ?? null,
   };
   queueStore.update((s) => ({ ...s, items: [...s.items, item] }));
+  void saveQueue();
   void tick();
   return item.id;
+}
+
+export function newGroupId(): string {
+  return `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function removeFromQueue(id: string): void {
@@ -222,6 +300,7 @@ export function removeFromQueue(id: string): void {
       logs: rest,
     };
   });
+  void saveQueue();
 }
 
 export async function cancelItem(id: string): Promise<void> {
@@ -244,7 +323,70 @@ export async function cancelItem(id: string): Promise<void> {
       i.id === id ? { ...i, status: 'canceled' as QueueItemStatus } : i
     ),
   }));
+  void saveQueue();
   void tick();
+}
+
+function isPending(s: QueueItemStatus): boolean {
+  return (
+    s === 'queued' ||
+    s === 'starting' ||
+    s === 'downloading' ||
+    s === 'paused' ||
+    s === 'postprocess'
+  );
+}
+
+/** Cancel every still-pending item that belongs to a playlist group. */
+export async function cancelGroup(groupId: string): Promise<void> {
+  const items = get(queueStore).items.filter((i) => i.group?.id === groupId);
+  for (const item of items) {
+    if (isPending(item.status)) {
+      await cancelItem(item.id);
+    }
+  }
+}
+
+/** Remove a whole playlist group, canceling anything still running. */
+export async function removeGroup(groupId: string): Promise<void> {
+  await cancelGroup(groupId);
+  queueStore.update((s) => {
+    const removed = new Set(
+      s.items.filter((i) => i.group?.id === groupId).map((i) => i.id)
+    );
+    const logs: Record<string, QueueLogLine[]> = {};
+    for (const [k, v] of Object.entries(s.logs)) {
+      if (!removed.has(k)) logs[k] = v;
+    }
+    return {
+      ...s,
+      items: s.items.filter((i) => !removed.has(i.id)),
+      logs,
+    };
+  });
+  void saveQueue();
+}
+
+/** Suspend the yt-dlp process of an actively downloading item. */
+export async function pauseItem(id: string): Promise<void> {
+  const item = get(queueStore).items.find((i) => i.id === id);
+  if (!item?.rustId || item.status !== 'downloading') return;
+  try {
+    await ipc.pauseDownload(item.rustId);
+  } catch (err) {
+    console.warn('[queue] pause failed', err);
+  }
+}
+
+/** Resume a paused item's yt-dlp process. */
+export async function resumeItem(id: string): Promise<void> {
+  const item = get(queueStore).items.find((i) => i.id === id);
+  if (!item?.rustId || item.status !== 'paused') return;
+  try {
+    await ipc.resumeDownload(item.rustId);
+  } catch (err) {
+    console.warn('[queue] resume failed', err);
+  }
 }
 
 /** Re-enqueue a failed or canceled item from scratch. */
@@ -272,6 +414,7 @@ export function retryItem(id: string): void {
       logs,
     };
   });
+  void saveQueue();
   void tick();
 }
 
@@ -287,6 +430,7 @@ export function clearCompleted(): void {
     }
     return { ...s, items: keep, logs };
   });
+  void saveQueue();
 }
 
 export function moveItem(id: string, direction: -1 | 1): void {
@@ -299,12 +443,14 @@ export function moveItem(id: string, direction: -1 | 1): void {
     [items[idx], items[target]] = [items[target], items[idx]];
     return { ...s, items };
   });
+  void saveQueue();
   void tick();
 }
 
 export function setConcurrency(n: number): void {
   const clamped = Math.max(1, Math.min(5, Math.floor(n)));
   queueStore.update((s) => ({ ...s, concurrency: clamped }));
+  void saveQueue();
   void tick();
 }
 

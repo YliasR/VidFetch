@@ -79,6 +79,7 @@ export interface DownloadOptions {
 export type DownloadStatusKind =
   | 'queued'
   | 'downloading'
+  | 'paused'
   | 'postprocess'
   | 'done'
   | 'error'

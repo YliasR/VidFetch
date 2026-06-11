@@ -11,3 +11,13 @@ pub async fn start_download(app: AppHandle, options: DownloadOptions) -> Result<
 pub async fn cancel_download(app: AppHandle, id: String) -> Result<bool, String> {
     runner::cancel(&app, &id).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn pause_download(app: AppHandle, id: String) -> Result<bool, String> {
+    runner::pause(&app, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn resume_download(app: AppHandle, id: String) -> Result<bool, String> {
+    runner::resume(&app, &id).map_err(|e| e.to_string())
+}

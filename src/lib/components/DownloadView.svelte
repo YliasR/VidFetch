@@ -19,7 +19,7 @@
     DEFAULT_OUTPUT_TEMPLATE,
     KNOWN_BROWSERS,
   } from '$lib/stores/download';
-  import { addToQueue } from '$lib/stores/queue';
+  import { addToQueue, newGroupId } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
   import { classifyError } from '$lib/errors';
   import { ipc } from '$lib/ipc';
@@ -261,10 +261,14 @@
     if (!playlist || !state.outputDir) return;
     const selected = playlist.entries.filter((_, i) => selectedIdx.has(i));
     if (selected.length === 0) return;
+    // Multiple entries from one probe collapse into a queue group.
+    const group =
+      selected.length > 1 ? { id: newGroupId(), title: playlist.title } : null;
     for (const entry of selected) {
       addToQueue({
         options: buildOptions(entry.url),
         display: displayFromEntry(entry),
+        group,
       });
     }
     lastAdded = { title: playlist.title, count: selected.length };

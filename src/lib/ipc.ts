@@ -30,4 +30,6 @@ export const ipc = {
   startDownload: (options: DownloadOptions) =>
     invoke<string>('start_download', { options }),
   cancelDownload: (id: string) => invoke<boolean>('cancel_download', { id }),
+  pauseDownload: (id: string) => invoke<boolean>('pause_download', { id }),
+  resumeDownload: (id: string) => invoke<boolean>('resume_download', { id }),
 };

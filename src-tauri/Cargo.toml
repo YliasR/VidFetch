@@ -37,6 +37,10 @@ log = "0.4"
 [target."cfg(windows)".dependencies]
 windows = { version = "0.58", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
+[target.'cfg(unix)'.dependencies]
+# SIGSTOP/SIGCONT for download pause/resume.
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # BtbN's Linux ffmpeg builds ship as tar.xz; "static" vendors liblzma so
 # the AppImage has no runtime dependency on the system library.

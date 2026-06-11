@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 pub struct JobHandle {
     pub task: JoinHandle<()>,
     pub child_id: Option<u32>,
+    pub paused: bool,
 }
 
 #[derive(Default)]

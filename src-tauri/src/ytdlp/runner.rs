@@ -82,6 +82,7 @@ pub fn spawn_download(app: AppHandle, opts: DownloadOptions) -> anyhow::Result<S
         JobHandle {
             task,
             child_id: None,
+            paused: false,
         },
     );
 
@@ -104,6 +105,110 @@ pub fn cancel(app: &AppHandle, id: &str) -> anyhow::Result<bool> {
     } else {
         Ok(false)
     }
+}
+
+/// Suspend a running job's yt-dlp process. Only meaningful during the
+/// download phase: postprocess children (ffmpeg) are separate processes
+/// and are not suspended, so the UI only offers pause while downloading.
+pub fn pause(app: &AppHandle, id: &str) -> anyhow::Result<bool> {
+    let state = app.state::<AppState>();
+    let mut jobs = state.jobs.lock().unwrap();
+    let Some(handle) = jobs.get_mut(id) else {
+        return Ok(false);
+    };
+    if handle.paused {
+        return Ok(true);
+    }
+    let Some(pid) = handle.child_id else {
+        anyhow::bail!("job has no running process yet");
+    };
+    suspend_process(pid)?;
+    handle.paused = true;
+    emit_status(app, id, "paused", None);
+    Ok(true)
+}
+
+/// Resume a previously paused job.
+pub fn resume(app: &AppHandle, id: &str) -> anyhow::Result<bool> {
+    let state = app.state::<AppState>();
+    let mut jobs = state.jobs.lock().unwrap();
+    let Some(handle) = jobs.get_mut(id) else {
+        return Ok(false);
+    };
+    if !handle.paused {
+        return Ok(true);
+    }
+    let Some(pid) = handle.child_id else {
+        anyhow::bail!("job has no running process");
+    };
+    resume_process(pid)?;
+    handle.paused = false;
+    emit_status(app, id, "downloading", None);
+    Ok(true)
+}
+
+#[cfg(windows)]
+fn suspend_process(pid: u32) -> anyhow::Result<()> {
+    nt_process_op(pid, true)
+}
+
+#[cfg(windows)]
+fn resume_process(pid: u32) -> anyhow::Result<()> {
+    nt_process_op(pid, false)
+}
+
+#[cfg(windows)]
+fn nt_process_op(pid: u32, suspend: bool) -> anyhow::Result<()> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SUSPEND_RESUME};
+
+    // NtSuspendProcess/NtResumeProcess suspend every thread in one call;
+    // they are stable ntdll exports despite not being in the Win32 API.
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtSuspendProcess(handle: HANDLE) -> i32;
+        fn NtResumeProcess(handle: HANDLE) -> i32;
+    }
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_SUSPEND_RESUME, false, pid)
+            .map_err(|e| anyhow::anyhow!("OpenProcess failed: {e}"))?;
+        let status = if suspend {
+            NtSuspendProcess(handle)
+        } else {
+            NtResumeProcess(handle)
+        };
+        let _ = CloseHandle(handle);
+        if status != 0 {
+            anyhow::bail!(
+                "{} failed with NTSTATUS 0x{status:08X}",
+                if suspend { "NtSuspendProcess" } else { "NtResumeProcess" }
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn suspend_process(pid: u32) -> anyhow::Result<()> {
+    signal_process(pid, libc::SIGSTOP)
+}
+
+#[cfg(unix)]
+fn resume_process(pid: u32) -> anyhow::Result<()> {
+    signal_process(pid, libc::SIGCONT)
+}
+
+#[cfg(unix)]
+fn signal_process(pid: u32, signal: i32) -> anyhow::Result<()> {
+    let ret = unsafe { libc::kill(pid as i32, signal) };
+    if ret != 0 {
+        anyhow::bail!(
+            "kill({pid}, {signal}) failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(windows)]

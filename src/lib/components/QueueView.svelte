@@ -10,6 +10,10 @@
     moveItem,
     setConcurrency,
     retryItem,
+    pauseItem,
+    resumeItem,
+    cancelGroup,
+    removeGroup,
     type QueueItem,
     type QueueItemStatus,
   } from '$lib/stores/queue';
@@ -20,6 +24,32 @@
   let initialized = false;
   let logsOpen: Record<string, boolean> = {};
   let fixBusy: Record<string, boolean> = {};
+  let groupOpen: Record<string, boolean> = {};
+
+  type Row =
+    | { kind: 'single'; item: QueueItem }
+    | { kind: 'group'; id: string; title: string; members: QueueItem[] };
+
+  function buildRows(all: QueueItem[]): Row[] {
+    const rows: Row[] = [];
+    const seen = new Set<string>();
+    for (const item of all) {
+      if (!item.group) {
+        rows.push({ kind: 'single', item });
+        continue;
+      }
+      if (seen.has(item.group.id)) continue;
+      seen.add(item.group.id);
+      const gid = item.group.id;
+      rows.push({
+        kind: 'group',
+        id: gid,
+        title: item.group.title,
+        members: all.filter((i) => i.group?.id === gid),
+      });
+    }
+    return rows;
+  }
 
   onMount(async () => {
     if (!initialized) {
@@ -30,6 +60,7 @@
 
   $: state = $queueStore;
   $: items = state.items;
+  $: rows = buildRows(items);
   $: hasItems = items.length > 0;
   $: hasCompleted = items.some(
     (i) => i.status === 'done' || i.status === 'canceled' || i.status === 'error'
@@ -80,16 +111,49 @@
     return s === 'downloading' || s === 'postprocess' || s === 'starting';
   }
 
+  function isPendingStatus(s: QueueItemStatus): boolean {
+    return isActive(s) || s === 'queued' || s === 'paused';
+  }
+
   function statusLabel(s: QueueItemStatus): string {
     switch (s) {
       case 'queued': return 'Queued';
       case 'starting': return 'Starting…';
       case 'downloading': return 'Downloading';
+      case 'paused': return 'Paused';
       case 'postprocess': return 'Post-processing';
       case 'done': return '✓ Done';
       case 'canceled': return 'Canceled';
       case 'error': return 'Error';
     }
+  }
+
+  function toggleGroup(id: string) {
+    groupOpen = { ...groupOpen, [id]: !groupOpen[id] };
+  }
+
+  function groupPct(members: QueueItem[]): number {
+    if (members.length === 0) return 0;
+    let sum = 0;
+    for (const i of members) {
+      if (i.status === 'done') sum += 100;
+      else if (i.total && i.total > 0) sum += Math.min(100, (i.downloaded / i.total) * 100);
+    }
+    return sum / members.length;
+  }
+
+  function groupSummary(members: QueueItem[]): string {
+    const done = members.filter((i) => i.status === 'done').length;
+    const failed = members.filter((i) => i.status === 'error').length;
+    const canceled = members.filter((i) => i.status === 'canceled').length;
+    const parts = [`${done} / ${members.length} done`];
+    if (failed > 0) parts.push(`${failed} failed`);
+    if (canceled > 0) parts.push(`${canceled} canceled`);
+    return parts.join(' · ');
+  }
+
+  function groupHasPending(members: QueueItem[]): boolean {
+    return members.some((i) => isPendingStatus(i.status));
   }
 
   async function openFolder(item: QueueItem) {
@@ -166,8 +230,7 @@
       </p>
     </div>
   {:else}
-    <div class="items">
-      {#each items as item, idx (item.id)}
+    {#snippet itemCard(item: QueueItem, idx: number, canMove: boolean)}
         {@const pct = percentOf(item)}
         <div class="card item" class:active={isActive(item.status)}>
           {#if item.display.thumbnail}
@@ -181,7 +244,7 @@
               <h3 title={item.display.title}>
                 {item.display.title}
               </h3>
-              <span class="status" class:done={item.status === 'done'} class:err={item.status === 'error' || item.status === 'canceled'}>
+              <span class="status" class:done={item.status === 'done'} class:err={item.status === 'error' || item.status === 'canceled'} class:paused={item.status === 'paused'}>
                 {statusLabel(item.status)}
               </span>
             </div>
@@ -196,15 +259,17 @@
                 <span class="dot">·</span>
                 <span>{formatDuration(item.display.duration)}</span>
               {/if}
-              {#if item.status === 'downloading' || item.status === 'postprocess'}
+              {#if item.status === 'downloading' || item.status === 'postprocess' || item.status === 'paused'}
                 <span class="dot">·</span>
                 <span class="num">
                   {formatBytes(item.downloaded)}{item.total ? ` / ${formatBytes(item.total)}` : ''}
                 </span>
-                <span class="dot">·</span>
-                <span class="num">{formatSpeed(item.speed)}</span>
-                <span class="dot">·</span>
-                <span class="num">ETA {formatEta(item.eta)}</span>
+                {#if item.status !== 'paused'}
+                  <span class="dot">·</span>
+                  <span class="num">{formatSpeed(item.speed)}</span>
+                  <span class="dot">·</span>
+                  <span class="num">ETA {formatEta(item.eta)}</span>
+                {/if}
               {/if}
             </div>
 
@@ -262,20 +327,28 @@
 
           <div class="actions">
             {#if item.status === 'queued'}
-              <button
-                class="icon-btn"
-                title="Move up"
-                disabled={idx === 0}
-                on:click={() => moveItem(item.id, -1)}
-              >↑</button>
-              <button
-                class="icon-btn"
-                title="Move down"
-                disabled={idx === items.length - 1}
-                on:click={() => moveItem(item.id, 1)}
-              >↓</button>
+              {#if canMove}
+                <button
+                  class="icon-btn"
+                  title="Move up"
+                  disabled={idx <= 0}
+                  on:click={() => moveItem(item.id, -1)}
+                >↑</button>
+                <button
+                  class="icon-btn"
+                  title="Move down"
+                  disabled={idx === items.length - 1}
+                  on:click={() => moveItem(item.id, 1)}
+                >↓</button>
+              {/if}
               <button class="icon-btn danger" title="Remove" on:click={() => removeFromQueue(item.id)}>✕</button>
+            {:else if item.status === 'paused'}
+              <button class="icon-btn" title="Resume" on:click={() => resumeItem(item.id)}>▶</button>
+              <button class="icon-btn danger" title="Cancel" on:click={() => cancelItem(item.id)}>✕</button>
             {:else if isActive(item.status)}
+              {#if item.status === 'downloading'}
+                <button class="icon-btn" title="Pause" on:click={() => pauseItem(item.id)}>⏸</button>
+              {/if}
               <button class="icon-btn danger" title="Cancel" on:click={() => cancelItem(item.id)}>✕</button>
             {:else if item.status === 'done'}
               <button class="icon-btn" title="Open folder" on:click={() => openFolder(item)}>📁</button>
@@ -288,6 +361,43 @@
             {/if}
           </div>
         </div>
+    {/snippet}
+
+    <div class="items">
+      {#each rows as row (row.kind === 'single' ? row.item.id : row.id)}
+        {#if row.kind === 'single'}
+          {@render itemCard(row.item, items.indexOf(row.item), true)}
+        {:else}
+          {@const pct = groupPct(row.members)}
+          {@const pending = groupHasPending(row.members)}
+          <div class="card group" class:active={row.members.some((i) => isActive(i.status))}>
+            <div class="group-row">
+              <button class="group-toggle" on:click={() => toggleGroup(row.id)}>
+                <span class="chevron">{groupOpen[row.id] ? '▾' : '▸'}</span>
+                <span class="group-title" title={row.title}>{row.title}</span>
+                <span class="group-count">{row.members.length} items</span>
+              </button>
+              <span class="group-summary muted num">{groupSummary(row.members)}</span>
+              <div class="actions row-actions">
+                {#if pending}
+                  <button class="icon-btn danger" title="Cancel all" on:click={() => cancelGroup(row.id)}>✕</button>
+                {:else}
+                  <button class="icon-btn danger" title="Remove group" on:click={() => removeGroup(row.id)}>🗑</button>
+                {/if}
+              </div>
+            </div>
+            <div class="bar">
+              <div class="fill" class:done={pct >= 100} style:width={`${pct}%`}></div>
+            </div>
+            {#if groupOpen[row.id]}
+              <div class="group-items">
+                {#each row.members as member (member.id)}
+                  {@render itemCard(member, -1, false)}
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -436,6 +546,10 @@
 
   .status.err {
     color: var(--danger);
+  }
+
+  .status.paused {
+    color: var(--warning, #d97706);
   }
 
   .meta {
@@ -616,5 +730,77 @@
   .icon-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .group-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--fg);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .chevron {
+    color: var(--fg-muted);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .group-title {
+    font-size: 14.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .group-count {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--fg-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .group-summary {
+    flex-shrink: 0;
+    font-size: 11.5px;
+  }
+
+  .row-actions {
+    flex-direction: row;
+  }
+
+  .group-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .group-items .item {
+    background: var(--surface-2);
   }
 </style>
