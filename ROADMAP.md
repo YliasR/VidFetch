@@ -112,14 +112,34 @@ The "feels finished" pass before the v1 push.
 
 ---
 
-## Phase 8 — Installer & release polish
+## Phase 8a — Cross-platform builds (pulled forward from v1.3)
+
+- [x] **macOS build** — universal .dmg (`macos-14`,
+      `--target universal-apple-darwin`). First-run installer fetches the
+      universal2 `yt-dlp_macos` plus per-arch ffmpeg/ffprobe from
+      martin-riedl.de (signed builds listed on ffmpeg.org), with retry to
+      ride out a flaky mirror.
+- [x] **Linux build** — `ubuntu-22.04`, ships `.AppImage` and `.deb`.
+      Installer fetches the standalone `yt-dlp_linux` plus ffmpeg/ffprobe
+      from BtbN's linux64 tar.xz (extracted via `xz2` + `tar`).
+- [ ] **macOS/Linux smoke test** — run the first-run wizard + a real
+      download on each platform before tagging v1.0.
+- [ ] **Platform-specific theming sanity** — audit macOS traffic-light
+      offset, Linux window controls placement.
+
+**Ship tag:** `v0.8.0-alpha`.
+
+---
+
+## Phase 8b — Installer & release polish
 
 - [ ] **Real app icon** — replace the placeholder icon set.
 - [ ] **NSIS installer polish** — sidebar image, license page, "launch
       VidFetch" checkbox on finish.
 - [ ] **Code signing** — document the cert flow even if we don't sign
-      for v1 (SmartScreen warning is accepted for now).
-- [ ] **Clean-VM smoke test** — install on a fresh Windows 11 VM with no
+      for v1 (Windows SmartScreen warning and macOS right-click-to-open
+      for the unsigned app are accepted for now).
+- [x] **Clean-VM smoke test** — install on a fresh Windows 11 VM with no
       dev tools, confirm first-run wizard + a real download work.
 - [ ] **README screenshots** — one per main view, fox theme teaser.
 
@@ -162,21 +182,6 @@ Smaller, focused improvements that ride on top of the v1.0 foundation.
       the window to enqueue.
 
 **Ship tag:** `v1.2.0`.
-
-## v1.3 — Cross-platform builds
-
-- [ ] **macOS build** — matrix-expand `release.yml` to `macos-14`,
-      ship a `.dmg`. Requires picking the right yt-dlp/ffmpeg asset
-      URLs per-platform (already abstracted via `paths.rs`, but the
-      installer URLs in `ytdlp/installer.rs` are Windows-hardcoded).
-- [ ] **Linux build** — `ubuntu-22.04`, ship `.AppImage` and `.deb`.
-      Same installer URL work.
-- [ ] **Platform-specific theming sanity** — audit macOS traffic-light
-      offset, Linux window controls placement.
-
-**Ship tag:** `v1.3.0`.
-
----
 
 # v2.0 and beyond — GIFs & video editing
 

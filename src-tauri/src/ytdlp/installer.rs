@@ -1,10 +1,10 @@
 //! yt-dlp + ffmpeg installer.
 //!
-//! - yt-dlp: fetches the latest Windows asset from the official GitHub
-//!   releases API and drops it into `<app_local_data>/bin/yt-dlp.exe`.
-//! - ffmpeg: downloads the "essentials" build from gyan.dev, extracts the
-//!   zip in memory, and writes only `ffmpeg.exe` + `ffprobe.exe` to the
-//!   same bin dir.
+//! - yt-dlp: fetches the standalone build for the current platform from the
+//!   official GitHub releases API and drops it into `<app_local_data>/bin/`.
+//! - ffmpeg: downloads a static build for the current platform, extracts the
+//!   archive in memory, and writes only the ffmpeg + ffprobe binaries to the
+//!   same bin dir. Sources: BtbN (Windows/Linux), martin-riedl.de (macOS).
 //!
 //! Progress is streamed to the frontend via the `installer://progress`
 //! event so the first-run wizard can render a proper progress bar.
@@ -13,7 +13,10 @@ use crate::paths;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
+
+#[cfg(any(windows, target_os = "macos"))]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 use tokio::process::Command;
@@ -26,8 +29,27 @@ const YTDLP_LATEST_API: &str =
 // BtbN's builds are the variant officially recommended by yt-dlp and are
 // hosted on GitHub's CDN, which is dramatically faster than gyan.dev for
 // most users. The `latest` tag is a rolling nightly of ffmpeg master.
+#[cfg(windows)]
 const FFMPEG_WINDOWS_URL: &str =
     "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
+
+#[cfg(target_os = "linux")]
+const FFMPEG_LINUX_URL: &str =
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz";
+
+// martin-riedl.de ships current, signed macOS builds for both architectures
+// and is one of the sources listed on ffmpeg.org. The redirect endpoint is
+// load-balanced and one mirror intermittently 404s; `get_with_retry`
+// papers over that.
+#[cfg(target_os = "macos")]
+const FFMPEG_MACOS_BASE: &str = "https://ffmpeg.martin-riedl.de/redirect/latest/macos";
+
+#[cfg(target_os = "macos")]
+const FFMPEG_MACOS_ARCH: &str = if cfg!(target_arch = "aarch64") {
+    "arm64"
+} else {
+    "amd64"
+};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,7 +105,8 @@ pub async fn install_ytdlp(app: &AppHandle) -> Result<PathBuf> {
     } else if cfg!(target_os = "macos") {
         "yt-dlp_macos"
     } else {
-        "yt-dlp"
+        // Standalone PyInstaller build — no system Python required.
+        "yt-dlp_linux"
     };
 
     let asset = release
@@ -108,13 +131,7 @@ pub async fn install_ytdlp(app: &AppHandle) -> Result<PathBuf> {
     )
     .await?;
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&dest)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&dest, perms)?;
-    }
+    set_executable(&dest)?;
 
     emit_phase(app, target, "done", None, "yt-dlp installed");
     Ok(dest)
@@ -144,28 +161,47 @@ pub async fn read_ytdlp_version(app: &AppHandle) -> Result<String> {
 pub async fn install_ffmpeg(app: &AppHandle) -> Result<PathBuf> {
     let target = "ffmpeg";
 
-    if !cfg!(windows) {
-        anyhow::bail!("automatic ffmpeg install only supports Windows in v1");
-    }
-
-    emit_phase(
-        app,
-        target,
-        "fetching",
-        None,
-        "Fetching ffmpeg essentials build",
-    );
+    emit_phase(app, target, "fetching", None, "Fetching ffmpeg build");
 
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .build()?;
 
+    paths::ensure_app_dirs(app)?;
+
+    #[cfg(windows)]
+    install_ffmpeg_windows(app, target, &client).await?;
+    #[cfg(target_os = "macos")]
+    install_ffmpeg_macos(app, target, &client).await?;
+    #[cfg(target_os = "linux")]
+    install_ffmpeg_linux(app, target, &client).await?;
+
+    let ffmpeg_dest = paths::ffmpeg_path(app)?;
+    let ffprobe_dest = paths::ffprobe_path(app)?;
+
+    if !ffmpeg_dest.exists() || !ffprobe_dest.exists() {
+        anyhow::bail!("ffmpeg extraction finished but binaries are missing on disk");
+    }
+
+    set_executable(&ffmpeg_dest)?;
+    set_executable(&ffprobe_dest)?;
+
+    emit_phase(app, target, "done", None, "ffmpeg installed");
+    Ok(ffmpeg_dest)
+}
+
+#[cfg(windows)]
+async fn install_ffmpeg_windows(
+    app: &AppHandle,
+    target: &'static str,
+    client: &reqwest::Client,
+) -> Result<()> {
     // Download the whole zip into memory (~40 MB) — simpler than streaming
     // to disk and back, and memory pressure is negligible on desktops.
     let bytes = download_to_memory(
         app,
         target,
-        &client,
+        client,
         FFMPEG_WINDOWS_URL,
         Some("Downloading ffmpeg".into()),
     )
@@ -174,19 +210,112 @@ pub async fn install_ffmpeg(app: &AppHandle) -> Result<PathBuf> {
     emit_phase(app, target, "extracting", None, "Extracting ffmpeg binaries");
 
     let dest_dir = paths::bin_dir(app)?;
-    paths::ensure_app_dirs(app)?;
+    extract_zip_binaries(bytes, dest_dir, &["ffmpeg.exe", "ffprobe.exe"]).await
+}
 
-    let ffmpeg_dest = paths::ffmpeg_path(app)?;
-    let ffprobe_dest = paths::ffprobe_path(app)?;
+#[cfg(target_os = "macos")]
+async fn install_ffmpeg_macos(
+    app: &AppHandle,
+    target: &'static str,
+    client: &reqwest::Client,
+) -> Result<()> {
+    // ffmpeg and ffprobe ship as separate single-binary zips.
+    for bin in ["ffmpeg", "ffprobe"] {
+        let url = format!("{FFMPEG_MACOS_BASE}/{FFMPEG_MACOS_ARCH}/release/{bin}.zip");
+        let bytes = download_to_memory(
+            app,
+            target,
+            client,
+            &url,
+            Some(format!("Downloading {bin}")),
+        )
+        .await?;
+
+        emit_phase(app, target, "extracting", None, "Extracting ffmpeg binaries");
+
+        let dest_dir = paths::bin_dir(app)?;
+        extract_zip_binaries(bytes, dest_dir, &[bin]).await?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn install_ffmpeg_linux(
+    app: &AppHandle,
+    target: &'static str,
+    client: &reqwest::Client,
+) -> Result<()> {
+    let bytes = download_to_memory(
+        app,
+        target,
+        client,
+        FFMPEG_LINUX_URL,
+        Some("Downloading ffmpeg".into()),
+    )
+    .await?;
+
+    emit_phase(app, target, "extracting", None, "Extracting ffmpeg binaries");
+
+    let dest_dir = paths::bin_dir(app)?;
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let decoder = xz2::read::XzDecoder::new(Cursor::new(bytes));
+        let mut archive = tar::Archive::new(decoder);
+
+        let wanted = ["ffmpeg", "ffprobe"];
+        let mut found = 0usize;
+
+        for entry in archive.entries().context("reading ffmpeg tar archive")? {
+            let mut entry = entry?;
+            let leaf = entry
+                .path()?
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+
+            if !wanted.contains(&leaf.as_str()) || !entry.header().entry_type().is_file() {
+                continue;
+            }
+
+            let out_path = dest_dir.join(&leaf);
+            let mut out = std::fs::File::create(&out_path)
+                .with_context(|| format!("creating {}", out_path.display()))?;
+            std::io::copy(&mut entry, &mut out)?;
+
+            found += 1;
+            if found == wanted.len() {
+                break;
+            }
+        }
+
+        if found < wanted.len() {
+            anyhow::bail!("ffmpeg archive did not contain expected binaries");
+        }
+        Ok(())
+    })
+    .await
+    .context("ffmpeg extract task panicked")??;
+
+    Ok(())
+}
+
+/// Extract the named binaries (matched by file name, any directory depth)
+/// from a zip held in memory into `dest_dir`.
+#[cfg(any(windows, target_os = "macos"))]
+async fn extract_zip_binaries(
+    bytes: Vec<u8>,
+    dest_dir: PathBuf,
+    wanted: &[&str],
+) -> Result<()> {
+    let wanted: Vec<String> = wanted.iter().map(|s| s.to_string()).collect();
 
     // zip crate is sync — run the extract on a blocking thread
-    let dest_dir_clone = dest_dir.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let reader = Cursor::new(bytes);
         let mut archive = zip::ZipArchive::new(reader)
             .context("opening ffmpeg zip archive")?;
 
-        let wanted = ["ffmpeg.exe", "ffprobe.exe"];
         let mut found = 0usize;
 
         for i in 0..archive.len() {
@@ -202,11 +331,11 @@ pub async fn install_ffmpeg(app: &AppHandle) -> Result<PathBuf> {
                 .unwrap_or_default()
                 .to_string();
 
-            if !wanted.contains(&leaf.as_str()) {
+            if !wanted.iter().any(|w| w == &leaf) {
                 continue;
             }
 
-            let out_path = dest_dir_clone.join(&leaf);
+            let out_path = dest_dir.join(&leaf);
             let mut out = std::fs::File::create(&out_path)
                 .with_context(|| format!("creating {}", out_path.display()))?;
 
@@ -228,12 +357,20 @@ pub async fn install_ffmpeg(app: &AppHandle) -> Result<PathBuf> {
     .await
     .context("ffmpeg extract task panicked")??;
 
-    if !ffmpeg_dest.exists() || !ffprobe_dest.exists() {
-        anyhow::bail!("ffmpeg extraction finished but binaries are missing on disk");
-    }
+    Ok(())
+}
 
-    emit_phase(app, target, "done", None, "ffmpeg installed");
-    Ok(ffmpeg_dest)
+fn set_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 pub async fn read_ffmpeg_version(app: &AppHandle) -> Result<String> {
@@ -264,6 +401,29 @@ pub async fn read_ffmpeg_version(app: &AppHandle) -> Result<String> {
 
 /* ============================ helpers ============================ */
 
+/// GET with a couple of retries. Mainly for the macOS ffmpeg mirror, where
+/// one load-balanced backend intermittently returns 404, but transient
+/// network errors on any platform benefit too.
+async fn get_with_retry(client: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
+    const ATTEMPTS: u32 = 3;
+    let mut last_err = anyhow!("unreachable");
+
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+        }
+        match client.get(url).send().await {
+            Ok(resp) => match resp.error_for_status() {
+                Ok(resp) => return Ok(resp),
+                Err(e) => last_err = anyhow!(e),
+            },
+            Err(e) => last_err = anyhow!(e),
+        }
+    }
+
+    Err(last_err.context(format!("GET {url} failed after {ATTEMPTS} attempts")))
+}
+
 fn emit_phase(
     app: &AppHandle,
     target: &'static str,
@@ -293,12 +453,7 @@ async fn download_to_file(
         std::fs::create_dir_all(parent)?;
     }
 
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?
-        .error_for_status()?;
+    let resp = get_with_retry(client, url).await?;
 
     let total = resp.content_length();
     let mut stream = resp.bytes_stream();
@@ -361,12 +516,7 @@ async fn download_to_memory(
     url: &str,
     message: Option<String>,
 ) -> Result<Vec<u8>> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("GET {url}"))?
-        .error_for_status()?;
+    let resp = get_with_retry(client, url).await?;
 
     let total = resp.content_length();
     let mut stream = resp.bytes_stream();

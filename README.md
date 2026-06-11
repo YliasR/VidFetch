@@ -24,7 +24,7 @@ It also **manages yt-dlp for you**: on first launch it downloads the latest yt-d
 - Real-time progress bars driven by `yt-dlp --progress-template`
 - Dark and light themes, system-preference aware
 - Output folder picker, persisted across launches
-- Windows installer (NSIS)
+- Native installers: Windows (NSIS), macOS (`.dmg`), Linux (AppImage + `.deb`)
 
 ### Planned (tracked in the project plan)
 
@@ -51,9 +51,13 @@ Grab the latest `VidFetch_x.y.z_x64-setup.exe` from the [Releases page](../../re
 
 On first launch, the app's setup wizard downloads yt-dlp (~5 MB) and ffmpeg (~100 MB) from their official sources. Everything lives in `%APPDATA%\be.mystic.vidfetch\`; no files touched outside that folder and your chosen download directory.
 
-### Linux / macOS
+### macOS
 
-Not shipped in `0.1`. The codebase targets cross-platform from day one, so these builds are a packaging exercise rather than a rewrite — tracked in the roadmap.
+Grab the universal `.dmg` (runs natively on Apple Silicon and Intel) from the [Releases page](../../releases) — ships from `v0.8.0-alpha`. The app is not yet signed or notarized, so on first launch right-click the app → **Open** (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/VidFetch.app`). App data lives in `~/Library/Application Support/be.mystic.vidfetch/`.
+
+### Linux
+
+Grab the `.AppImage` (portable) or `.deb` (Debian/Ubuntu) from the [Releases page](../../releases) — ships from `v0.8.0-alpha`. App data lives in `~/.local/share/be.mystic.vidfetch/`. Note: in-app auto-update only works for the AppImage; `.deb` installs update through your package manager or a manual download.
 
 ## Build from source
 
@@ -68,7 +72,7 @@ git clone https://github.com/<you>/VidFetch.git
 cd VidFetch
 npm install
 npm run tauri dev     # hot-reload dev build
-npm run tauri build   # release build + NSIS installer in src-tauri/target/release/bundle/
+npm run tauri build   # release build + platform installer in src-tauri/target/release/bundle/
 ```
 
 ## Project layout
@@ -98,14 +102,14 @@ VidFetch/
 | Styling       | Plain CSS + custom properties             | Maximum theme flexibility, no framework churn                       |
 | Downloader    | [yt-dlp](https://github.com/yt-dlp/yt-dlp)| Best-in-class extractor coverage                                    |
 | Postprocessor | [ffmpeg](https://ffmpeg.org/) (BtbN build)| Required for merging, audio extraction, and metadata/thumb embedding|
-| Packaging     | NSIS (via Tauri bundler)                  | Smaller, friendlier than MSI for a desktop app                      |
+| Packaging     | NSIS / dmg / AppImage / deb (Tauri bundler)| Native installer per platform from one config                      |
 
 ## Credits
 
 VidFetch is a GUI — all the heavy lifting is done by upstream projects:
 
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — the actual downloader. None of this works without it.
-- **[ffmpeg](https://ffmpeg.org/)** — format conversion and stream muxing. Windows builds by [BtbN](https://github.com/BtbN/FFmpeg-Builds).
+- **[ffmpeg](https://ffmpeg.org/)** — format conversion and stream muxing. Windows/Linux builds by [BtbN](https://github.com/BtbN/FFmpeg-Builds), macOS builds by [Martin Riedl](https://ffmpeg.martin-riedl.de/).
 - **[Tauri](https://v2.tauri.app/)** — the app shell framework.
 - **[Svelte](https://svelte.dev/)** — the frontend framework.
 

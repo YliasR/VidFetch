@@ -213,7 +213,7 @@
       </div>
     </div>
     <p class="muted small">
-      Bundled ffmpeg comes from BtbN's Windows builds. Rarely needs updating.
+      Bundled ffmpeg comes from a trusted static build for your platform. Rarely needs updating.
     </p>
     {#if ytdlpError}
       <div class="error">
@@ -241,8 +241,8 @@
       </div>
     </div>
     <p class="muted small">
-      Sends a system toast when a download finishes or fails. First time you enable it,
-      Windows may ask for permission.
+      Sends a system notification when a download finishes or fails. First time you
+      enable it, your system may ask for permission.
     </p>
   </div>
 
