@@ -1,6 +1,6 @@
 # VidFetch Roadmap
 
-Phases 1–7c shipped (current: `v0.7.0-alpha`). Remaining work is grouped below.
+Phases 1–8 shipped (current: `v1.0.0`). Remaining work is grouped below.
 Each phase is its own checkpoint and gets an alpha tag.
 
 ---
@@ -133,10 +133,10 @@ The "feels finished" pass before the v1 push.
 
 ## Phase 8b — Installer & release polish
 
-- [ ] **Real app icon** — replace the placeholder icon set.
-- [ ] **NSIS installer polish** — sidebar image, license page, "launch
-      VidFetch" checkbox on finish.
-- [ ] **Code signing** — document the cert flow even if we don't sign
+- [x] **Real app icon** — replace the placeholder icon set.
+- [x] **NSIS installer polish** — sidebar + header art shipped; license
+      page and "launch VidFetch" checkbox deferred past v1.
+- [x] **Code signing** — document the cert flow even if we don't sign
       for v1 (Windows SmartScreen warning and macOS right-click-to-open
       for the unsigned app are accepted for now).
 - [x] **Clean-VM smoke test** — install on a fresh Windows 11 VM with no

@@ -1,6 +1,6 @@
 [package]
 name = "vidfetch"
-version = "0.7.0-alpha"
+version = "1.0.0"
 description = "A sleek yt-dlp GUI wrapper"
 authors = ["Ylias Roggeman"]
 edition = "2021"

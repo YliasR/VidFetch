@@ -8,7 +8,7 @@ A sleek, cross-platform desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dl
 
 Built with Tauri v2 + Svelte 5 + TypeScript. Rust handles the download pipeline; the UI is plain CSS with full theme control.
 
-> **Status:** alpha (`0.7.x`), feature-complete and heading toward `1.0`. Remaining work is polish, packaging, and (eventually) code signing.
+> **Status:** `1.0` — stable core feature set. Builds are not yet code-signed (see install notes below).
 
 ---
 
@@ -36,10 +36,9 @@ It also **manages yt-dlp for you**: on first launch it downloads the latest yt-d
 - **Self-maintaining** — first-run wizard fetches yt-dlp + ffmpeg; in-app auto-update for VidFetch itself
 - **Native installers** — Windows (NSIS), macOS (`.dmg`), Linux (AppImage + `.deb`)
 
-### On the way to 1.0
+### Post-1.0
 
-- [ ] Cross-platform CI release pipeline (Windows / macOS / Linux from one tag)
-- [ ] Code signing (Windows + macOS notarization) — planned post-1.0, [it costs money](https://learn.microsoft.com/en-us/azure/trusted-signing/)
+- [ ] Code signing (Windows + macOS notarization) — [it costs money](https://learn.microsoft.com/en-us/azure/trusted-signing/)
 
 ## Install
 
@@ -51,11 +50,11 @@ On first launch, the app's setup wizard downloads yt-dlp (~5 MB) and ffmpeg (~10
 
 ### macOS
 
-Grab the universal `.dmg` (runs natively on Apple Silicon and Intel) from the [Releases page](../../releases) — ships from `v0.8.0-alpha`. The app is not yet signed or notarized, so on first launch right-click the app → **Open** (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/VidFetch.app`). App data lives in `~/Library/Application Support/be.mystic.vidfetch/`.
+Grab the universal `.dmg` (runs natively on Apple Silicon and Intel) from the [Releases page](../../releases) — ships from `v1.0.0`. The app is not yet signed or notarized, so on first launch right-click the app → **Open** (or clear the quarantine flag with `xattr -d com.apple.quarantine /Applications/VidFetch.app`). App data lives in `~/Library/Application Support/be.mystic.vidfetch/`.
 
 ### Linux
 
-Grab the `.AppImage` (portable) or `.deb` (Debian/Ubuntu) from the [Releases page](../../releases) — ships from `v0.8.0-alpha`. App data lives in `~/.local/share/be.mystic.vidfetch/`. Note: in-app auto-update only works for the AppImage; `.deb` installs update through your package manager or a manual download.
+Grab the `.AppImage` (portable) or `.deb` (Debian/Ubuntu) from the [Releases page](../../releases) — ships from `v1.0.0`. App data lives in `~/.local/share/be.mystic.vidfetch/`. Note: in-app auto-update only works for the AppImage; `.deb` installs update through your package manager or a manual download.
 
 ## Build from source
 

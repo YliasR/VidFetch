@@ -80,7 +80,7 @@ jobs:
             echo ''
             echo '---'
             echo ''
-            echo 'This is an early alpha. Expect bugs and missing features — please report any issues you hit.'
+            echo 'Please report any issues you hit.'
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
