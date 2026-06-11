@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1a0e"/>
+      <stop offset="1" stop-color="#160c06"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffa861"/>
+      <stop offset="1" stop-color="#ff8c42"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.6" r="0.6">
+      <stop offset="0" stop-color="#ff8c42" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff8c42" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- rounded-square app tile -->
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="232" fill="url(#glow)"/>
+
+  <!-- arrow shaft (doubles as the fox's blaze stripe) -->
+  <rect x="474" y="112" width="76" height="460" rx="34" fill="#ffedd9"/>
+
+  <!-- ears -->
+  <polygon points="232,398 196,118 462,306" fill="url(#face)"/>
+  <polygon points="792,398 828,118 562,306" fill="url(#face)"/>
+  <!-- inner ears -->
+  <polygon points="266,356 246,186 404,308" fill="#8a3d14"/>
+  <polygon points="758,356 778,186 620,308" fill="#8a3d14"/>
+
+  <!-- head -->
+  <polygon points="268,296 756,296 826,486 512,818 198,486" fill="url(#face)"/>
+
+  <!-- blaze stripe continuation on the face -->
+  <rect x="474" y="296" width="76" height="280" fill="#ffedd9"/>
+
+  <!-- cream muzzle = arrowhead -->
+  <polygon points="318,538 706,538 512,744" fill="#ffedd9"/>
+
+  <!-- eyes -->
+  <circle cx="352" cy="470" r="40" fill="#2b1208"/>
+  <circle cx="672" cy="470" r="40" fill="#2b1208"/>
+
+  <!-- nose -->
+  <circle cx="512" cy="724" r="40" fill="#2b1208"/>
+</svg>

@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bgGlow" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#232328"/>
+      <stop offset="1" stop-color="#17171a"/>
+    </radialGradient>
+    <linearGradient id="fox" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff8c2d"/>
+      <stop offset="1" stop-color="#f35d02"/>
+    </linearGradient>
+    <linearGradient id="tailGrad" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#f06a08"/>
+      <stop offset="1" stop-color="#c84a00"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2c31"/>
+      <stop offset="1" stop-color="#202024"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffdab9"/>
+      <stop offset="1" stop-color="#d35400"/>
+    </linearGradient>
+    <linearGradient id="tray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e67e22"/>
+      <stop offset="1" stop-color="#b34700"/>
+    </linearGradient>
+    <radialGradient id="forehead" cx="0.5" cy="0.25" r="0.55">
+      <stop offset="0" stop-color="#ffc380" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffc380" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ======== layer 1: background squircle ======== -->
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#bgGlow)"/>
+  <!-- subtle inner edge light -->
+  <rect x="70" y="70" width="884" height="884" rx="196" fill="none" stroke="#3a3a40" stroke-width="3" opacity="0.6"/>
+
+  <!-- ======== layer 2: tail (wraps behind tile, right + bottom) ======== -->
+  <path fill="url(#tailGrad)" d="
+    M 620,440
+    C 850,400 965,560 945,720
+    C 925,860 760,915 560,900
+    C 460,893 380,872 320,825
+    C 380,800 460,795 560,810
+    C 720,805 830,720 820,590
+    C 812,505 720,455 620,470
+    Z"/>
+  <!-- cream tail tip -->
+  <path fill="#ffe0b2" d="
+    M 470,898
+    C 395,890 345,865 320,825
+    C 345,782 420,768 480,792
+    C 520,826 515,876 470,898
+    Z"/>
+  <!-- fur jags on inner curve -->
+  <g fill="url(#tailGrad)">
+    <polygon points="640,812 700,790 668,846"/>
+    <polygon points="740,772 794,732 776,800"/>
+    <polygon points="800,690 844,634 842,706"/>
+  </g>
+
+  <!-- ======== layer 3: media tile ======== -->
+  <rect x="312" y="400" width="400" height="380" rx="44" fill="url(#tile)"/>
+  <!-- beveled top highlight -->
+  <rect x="312" y="400" width="400" height="380" rx="44" fill="none" stroke="#45454c" stroke-width="3" opacity="0.8"/>
+  <!-- film perforations -->
+  <g fill="#e67e22">
+    <rect x="334" y="446" width="26" height="26" rx="8"/>
+    <rect x="334" y="526" width="26" height="26" rx="8"/>
+    <rect x="334" y="606" width="26" height="26" rx="8"/>
+    <rect x="334" y="686" width="26" height="26" rx="8"/>
+    <rect x="664" y="446" width="26" height="26" rx="8"/>
+    <rect x="664" y="526" width="26" height="26" rx="8"/>
+    <rect x="664" y="606" width="26" height="26" rx="8"/>
+    <rect x="664" y="686" width="26" height="26" rx="8"/>
+  </g>
+  <!-- download arrow -->
+  <g fill="url(#arrow)">
+    <rect x="484" y="508" width="56" height="104" rx="12"/>
+    <polygon points="442,600 582,600 512,678"/>
+  </g>
+  <!-- tray bracket -->
+  <path fill="none" stroke="url(#tray)" stroke-width="24" stroke-linecap="round" d="
+    M 432,700 v 24 q 0,22 22,22 h 116 q 22,0 22,-22 v -24"/>
+
+  <!-- ambient shadow where the fox rests on the tile -->
+  <ellipse cx="512" cy="468" rx="190" ry="48" fill="#000000" opacity="0.22"/>
+
+  <!-- ======== layer 4: fox head + paws ======== -->
+  <g transform="rotate(-4 512 330)">
+    <!-- ears: dark backing -->
+    <polygon points="330,260 283,74 485,177" fill="#2d1b14"/>
+    <polygon points="694,260 741,74 539,177" fill="#2d1b14"/>
+    <!-- ears: orange -->
+    <polygon points="334,250 292,84 472,176" fill="url(#fox)"/>
+    <polygon points="690,250 732,84 552,176" fill="url(#fox)"/>
+    <!-- inner ears: cream -->
+    <polygon points="352,236 322,116 452,184" fill="#ffe9cf"/>
+    <polygon points="672,236 702,116 572,184" fill="#ffe9cf"/>
+    <!-- head -->
+    <ellipse cx="512" cy="330" rx="200" ry="172" fill="url(#fox)"/>
+    <ellipse cx="512" cy="330" rx="200" ry="172" fill="url(#forehead)"/>
+    <!-- cheek tufts (left) -->
+    <g fill="url(#fox)">
+      <polygon points="318,290 270,272 322,322"/>
+      <polygon points="314,336 262,330 320,366"/>
+      <polygon points="320,378 274,388 330,406"/>
+    </g>
+    <!-- closed eyes -->
+    <g fill="none" stroke="#3a2114" stroke-width="18" stroke-linecap="round">
+      <path d="M 392,322 Q 424,352 456,322"/>
+      <path d="M 568,322 Q 600,352 632,322"/>
+    </g>
+    <!-- snout resting on tile (tapered) -->
+    <path fill="#fff5e6" d="
+      M 512,362
+      C 596,362 638,408 624,458
+      C 612,500 566,522 512,522
+      C 458,522 412,500 400,458
+      C 386,408 428,362 512,362 Z"/>
+    <!-- nose at snout tip -->
+    <path fill="#2d1b14" d="M 486,448 h 52 q 11,0 6,11 l -23,27 q -9,11 -18,0 l -23,-27 q -5,-11 6,-11 Z"/>
+  </g>
+  <!-- paws gripping the tile edge -->
+  <g fill="#2d1b14">
+    <rect x="346" y="462" width="80" height="56" rx="26"/>
+    <rect x="598" y="456" width="80" height="56" rx="26"/>
+  </g>
+  <!-- toe indentations -->
+  <g stroke="#1d100a" stroke-width="7" stroke-linecap="round">
+    <line x1="372" y1="490" x2="372" y2="510"/>
+    <line x1="399" y1="492" x2="399" y2="512"/>
+    <line x1="625" y1="484" x2="625" y2="504"/>
+    <line x1="652" y1="482" x2="652" y2="502"/>
+  </g>
+</svg>

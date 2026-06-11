@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 57">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1a0e"/>
+      <stop offset="1" stop-color="#160c06"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="150" height="57" fill="url(#bg)"/>
+
+  <!-- app icon -->
+  <image href="icon.svg" x="6" y="7" width="44" height="44"/>
+
+  <text x="58" y="36" font-family="Segoe UI" font-weight="700" font-size="18" fill="#ffedd9">VidFetch</text>
+</svg>

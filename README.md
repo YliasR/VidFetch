@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="branding/banner.png" alt="VidFetch — Download anything. No terminal required." width="800"/>
+</p>
+
 # VidFetch
 
 A sleek, cross-platform desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp) — paste a URL, pick a format, download. No terminal required.
 
-Built with Tauri v2 + Svelte 5 + TypeScript. Rust handles the download pipeline; the UI is plain CSS with full theme control (dark, light).
+Built with Tauri v2 + Svelte 5 + TypeScript. Rust handles the download pipeline; the UI is plain CSS with full theme control.
 
-> **Status:** early alpha (`0.1.x`). Things work; things are also missing. See [Roadmap](#roadmap).
+> **Status:** alpha (`0.7.x`), feature-complete and heading toward `1.0`. Remaining work is polish, packaging, and (eventually) code signing.
 
 ---
 
@@ -16,32 +20,26 @@ It also **manages yt-dlp for you**: on first launch it downloads the latest yt-d
 
 ## Features
 
-### In `0.1` (alpha)
+- **Paste-and-download** — single videos, playlists (with per-item selection), or audio-only
+- **Download queue** — concurrency limit, pause / resume / cancel, scheduler
+- **Format control** — resolution/codec/quality picker, output container choice (mp4 / mkv / webm)
+- **Subtitles** — multi-language download and embedding
+- **Embedding** — thumbnail, metadata, and chapters baked into the output file
+- **SponsorBlock** — skip or remove sponsored segments
+- **Cookies** — import from your browser or a `cookies.txt` for member/age-gated content
+- **Power options** — rate limit, retries, custom output template, download archive (skip already-downloaded)
+- **History** — past downloads with re-download and open-folder shortcuts
+- **Presets** — save your favorite option combos
+- **Raw log panel** — full yt-dlp output per job for debugging
+- **Error recovery** — actionable error messages with one-click retry
+- **Themes** — dark, light, and fox 🦊, system-preference aware
+- **Self-maintaining** — first-run wizard fetches yt-dlp + ffmpeg; in-app auto-update for VidFetch itself
+- **Native installers** — Windows (NSIS), macOS (`.dmg`), Linux (AppImage + `.deb`)
 
-- Paste-and-download single videos
-- Auto format/quality detection
-- First-run wizard that fetches yt-dlp + ffmpeg automatically
-- Real-time progress bars driven by `yt-dlp --progress-template`
-- Dark and light themes, system-preference aware
-- Output folder picker, persisted across launches
-- Native installers: Windows (NSIS), macOS (`.dmg`), Linux (AppImage + `.deb`)
+### On the way to 1.0
 
-### Planned (tracked in the project plan)
-
-- [ ] Download queue with pause / resume / cancel and concurrency limit
-- [ ] Full format browser (resolution, codec, bitrate, size)
-- [ ] Playlist picker with per-item selection
-- [ ] Subtitle download + embedding (multi-language)
-- [ ] Thumbnail + metadata + chapter embedding
-- [ ] SponsorBlock integration
-- [ ] Cookies import (from browser or `cookies.txt`)
-- [ ] Rate limit, retries, output template editor
-- [ ] Download archive (skip already-downloaded)
-- [ ] History with re-download and open-folder shortcuts
-- [ ] Saved presets
-- [ ] Raw-log debug panel per job
-- [ ] Linux (AppImage + `.deb`) and macOS (`.dmg`) builds
-- [ ] In-app auto-update via `tauri-plugin-updater`
+- [ ] Cross-platform CI release pipeline (Windows / macOS / Linux from one tag)
+- [ ] Code signing (Windows + macOS notarization) — planned post-1.0, [it costs money](https://learn.microsoft.com/en-us/azure/trusted-signing/)
 
 ## Install
 
@@ -68,11 +66,21 @@ You need:
 - The [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows — usually already installed on Windows 11)
 
 ```bash
-git clone https://github.com/<you>/VidFetch.git
+git clone https://github.com/YliasR/VidFetch.git
 cd VidFetch
 npm install
 npm run tauri dev     # hot-reload dev build
 npm run tauri build   # release build + platform installer in src-tauri/target/release/bundle/
+```
+
+### Branding assets
+
+Icon and installer artwork are generated from the SVG sources in `branding/`:
+
+```bash
+npm run tauri icon -- branding/icon.svg   # regenerate the full app icon set
+pip install resvg-py pillow
+python branding/build.py                  # regenerate NSIS bitmaps + README banner
 ```
 
 ## Project layout
@@ -90,6 +98,7 @@ VidFetch/
 │       ├── ytdlp/        # installer + runner + arg builder
 │       ├── paths.rs      # app data / bin dir resolution
 │       └── state.rs      # shared app state
+├── branding/             # SVG sources + build script for icon/banner art
 └── scripts/              # dev/build helper scripts
 ```
 
