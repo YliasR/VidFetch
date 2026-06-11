@@ -2,6 +2,21 @@
   <img src="branding/banner.png" alt="VidFetch — Download anything. No terminal required." width="800"/>
 </p>
 
+<p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/YliasR/VidFetch?label=release&color=ff8c42" alt="Latest release"/></a>
+  <a href="../../releases"><img src="https://img.shields.io/github/downloads/YliasR/VidFetch/total?color=ff8c42" alt="Downloads"/></a>
+  <a href="../../actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/YliasR/VidFetch/release.yml?label=build" alt="Build status"/></a>
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-2b1a0e" alt="Platforms"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Tauri_2-24C8D8?logo=tauri&logoColor=white" alt="Tauri 2"/>
+  <img src="https://img.shields.io/badge/Svelte_5-FF3E00?logo=svelte&logoColor=white" alt="Svelte 5"/>
+  <img src="https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white" alt="Rust"/>
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/yt--dlp-cc0000?logo=youtube&logoColor=white" alt="yt-dlp"/>
+</p>
+
 # VidFetch
 
 A sleek, cross-platform desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp) — paste a URL, pick a format, download. No terminal required.
