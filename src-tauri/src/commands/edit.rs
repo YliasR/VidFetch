@@ -68,6 +68,21 @@ pub struct GifAppendOptions {
     pub loop_count: Option<i32>,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimOptions {
+    pub input_path: String,
+    pub output_path: String,
+    /// Start in seconds; 0 / None means from the beginning.
+    pub start: Option<f64>,
+    /// End in seconds; None means to the end of the source.
+    pub end: Option<f64>,
+    /// Re-encode instead of stream-copy. The frontend sets this when the
+    /// start doesn't land on a keyframe (a `-c copy` cut would be inaccurate
+    /// there). When false we copy packets for a lossless, near-instant trim.
+    pub reencode: bool,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EditStatus {
@@ -239,6 +254,116 @@ pub async fn cancel_export(app: AppHandle, id: String) -> Result<bool, String> {
     } else {
         Ok(false)
     }
+}
+
+/// List the keyframe (I-frame) timestamps of a video's first video stream,
+/// in seconds, sorted ascending. The Trim view uses these to snap cut points
+/// and to decide whether a `-c copy` (lossless) trim is possible: a copy is
+/// only accurate when the start lands on a keyframe.
+#[tauri::command]
+pub async fn list_keyframes(app: AppHandle, path: String) -> Result<Vec<f64>, String> {
+    let ffprobe = paths::ffprobe_path(&app).map_err(|e| e.to_string())?;
+    if !ffprobe.exists() {
+        return Err("ffprobe not installed".into());
+    }
+    if !Path::new(&path).exists() {
+        return Err(format!("file not found: {path}"));
+    }
+
+    let mut cmd = Command::new(&ffprobe);
+    cmd.args([
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-skip_frame",
+        "nokey",
+        "-show_entries",
+        "frame=pts_time,best_effort_timestamp_time",
+        "-print_format",
+        "json",
+    ])
+    .arg(&path)
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    crate::ytdlp::hide_console(&mut cmd);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ffprobe: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("failed to parse ffprobe JSON: {e}"))?;
+
+    let mut times: Vec<f64> = json
+        .get("frames")
+        .and_then(|f| f.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|frame| {
+                    // pts_time is usually present; fall back to the
+                    // best-effort timestamp when a frame reports "N/A".
+                    frame
+                        .get("pts_time")
+                        .or_else(|| frame.get("best_effort_timestamp_time"))
+                        .and_then(|t| t.as_str())
+                        .and_then(|t| t.parse::<f64>().ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    times.dedup_by(|a, b| (*a - *b).abs() < 0.0005);
+    Ok(times)
+}
+
+/// Trim a single range out of a video. Returns a job id; progress arrives via
+/// `edit://*`, same as the GIF commands. `reencode` selects between a lossless
+/// stream-copy (`-c copy`) and a re-encode.
+#[tauri::command]
+pub async fn trim_video(app: AppHandle, options: TrimOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    if let (Some(start), Some(end)) = (options.start, options.end) {
+        if end <= start {
+            return Err("end must be after start".into());
+        }
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let id_for_task = id.clone();
+    let app_for_task = app.clone();
+
+    let task = tokio::spawn(async move {
+        run_trim(app_for_task, id_for_task, ffmpeg, options).await;
+    });
+
+    let state = app.state::<AppState>();
+    state.jobs.lock().unwrap().insert(
+        id.clone(),
+        JobHandle {
+            task,
+            child_id: None,
+            paused: false,
+        },
+    );
+
+    emit_status(&app, &id, "queued", None);
+    Ok(id)
 }
 
 /// Append a video/GIF range onto an existing GIF and re-encode the whole
@@ -446,6 +571,57 @@ async fn run_append(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifAppend
                 .contains_key(&id);
             if still_tracked {
                 finish(&app, &id, "error", Some(format!("encode failed: {e}")));
+            }
+        }
+    }
+}
+
+async fn run_trim(app: AppHandle, id: String, ffmpeg: PathBuf, opts: TrimOptions) {
+    // Range length drives the progress fraction.
+    let start = opts.start.unwrap_or(0.0).max(0.0);
+    let len = match opts.end {
+        Some(end) => Some((end - start).max(0.1)),
+        None => media_duration(&app, &opts.input_path)
+            .await
+            .map(|d| (d - start).max(0.1)),
+    };
+
+    emit_status(&app, &id, "encoding", None);
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y");
+    // -ss before -i fast-seeks; on a re-encode it stays frame-accurate, and on
+    // a copy it lands on the keyframe the frontend already snapped the start to.
+    if start > 0.0 {
+        cmd.args(["-ss", &format!("{start}")]);
+    }
+    cmd.arg("-i").arg(&opts.input_path);
+    if let Some(end) = opts.end {
+        cmd.args(["-t", &format!("{}", (end - start).max(0.1))]);
+    }
+    if opts.reencode {
+        cmd.args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt",
+            "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        ]);
+    } else {
+        // Stream-copy: no re-encode, so the cut is lossless and near-instant.
+        cmd.args(["-c", "copy"]);
+    }
+    cmd.args(["-progress", "pipe:1", "-nostats"]);
+    cmd.arg(&opts.output_path);
+
+    let result = run_pass(&app, &id, cmd, len).await;
+    match result {
+        Ok(()) => finish(&app, &id, "done", Some(opts.output_path.clone())),
+        Err(e) => {
+            let still_tracked = app
+                .state::<AppState>()
+                .jobs
+                .lock()
+                .unwrap()
+                .contains_key(&id);
+            if still_tracked {
+                finish(&app, &id, "error", Some(format!("trim failed: {e}")));
             }
         }
     }

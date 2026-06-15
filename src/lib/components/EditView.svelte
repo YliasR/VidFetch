@@ -5,6 +5,11 @@
   import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { openPath } from '@tauri-apps/plugin-opener';
   import { ipc, type MediaInfo, type GifDither, type GifAppendPosition } from '$lib/ipc';
+  import TrimView from './TrimView.svelte';
+
+  /** Edit tab sub-modes: video→GIF studio vs. trim & cut. */
+  type EditMode = 'gif' | 'trim';
+  let mode: EditMode = 'gif';
 
   /** Extensions the Edit tab will load as a source clip (video or GIF). */
   const MEDIA_EXTS = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'gif'];
@@ -75,7 +80,7 @@
       // The global URL drop handler ignores media files, so this is the only
       // consumer. Only mounted while the Edit view is active.
       getCurrentWebview().onDragDropEvent((event) => {
-        if (event.payload.type !== 'drop' || exporting) return;
+        if (mode !== 'gif' || event.payload.type !== 'drop' || exporting) return;
         const media = event.payload.paths.find(isMediaPath);
         if (media) void loadSource(media);
       }),
@@ -275,11 +280,39 @@
   <header class="title">
     <h2>Edit</h2>
     <p class="muted">
-      Turn a video into a GIF, re-edit an existing GIF, or append a clip onto one. Drop a video or
-      GIF anywhere on this tab to load it.
+      {#if mode === 'gif'}
+        Turn a video into a GIF, re-edit an existing GIF, or append a clip onto one. Drop a video or
+        GIF anywhere on this tab to load it.
+      {:else}
+        Cut a range out of a video — lossless when the start lands on a keyframe, re-encoded
+        otherwise. Drop a video anywhere on this tab to load it.
+      {/if}
     </p>
+    <div class="modes" role="tablist">
+      <button
+        class="mode-tab"
+        class:active={mode === 'gif'}
+        role="tab"
+        aria-selected={mode === 'gif'}
+        on:click={() => (mode = 'gif')}
+      >
+        GIF
+      </button>
+      <button
+        class="mode-tab"
+        class:active={mode === 'trim'}
+        role="tab"
+        aria-selected={mode === 'trim'}
+        on:click={() => (mode = 'trim')}
+      >
+        Trim &amp; cut
+      </button>
+    </div>
   </header>
 
+  {#if mode === 'trim'}
+    <TrimView />
+  {:else}
   <div class="card">
     <div class="label">Source</div>
     <div class="source-row">
@@ -448,6 +481,7 @@
       {/if}
     </div>
   {/if}
+  {/if}
 </section>
 
 <style>
@@ -466,6 +500,36 @@
 
   .title p {
     margin: 0;
+  }
+
+  .modes {
+    display: inline-flex;
+    gap: 4px;
+    margin-top: 12px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-3);
+  }
+
+  .mode-tab {
+    border: none;
+    background: transparent;
+    color: var(--fg-muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 16px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .mode-tab:hover {
+    color: var(--fg);
+  }
+
+  .mode-tab.active {
+    background: var(--surface-1);
+    color: var(--fg);
   }
 
   .card {

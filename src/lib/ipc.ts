@@ -63,6 +63,15 @@ export interface GifAppendOptions {
   loopCount: number | null;
 }
 
+export interface TrimOptions {
+  inputPath: string;
+  outputPath: string;
+  start: number | null;
+  end: number | null;
+  /** Re-encode instead of lossless stream-copy. */
+  reencode: boolean;
+}
+
 export const ipc = {
   checkBinaries: () => invoke<BinariesStatus>('check_binaries'),
   installYtdlp: () => invoke<string>('install_ytdlp'),
@@ -80,6 +89,8 @@ export const ipc = {
   probeMedia: (path: string) => invoke<MediaInfo>('probe_media', { path }),
   exportGif: (options: GifExportOptions) => invoke<string>('export_gif', { options }),
   appendToGif: (options: GifAppendOptions) => invoke<string>('append_to_gif', { options }),
+  listKeyframes: (path: string) => invoke<number[]>('list_keyframes', { path }),
+  trimVideo: (options: TrimOptions) => invoke<string>('trim_video', { options }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
 
   checkAppUpdate: (channel: string) =>
