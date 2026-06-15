@@ -98,10 +98,15 @@ MainPane.svelte        View switch on $currentView
 DownloadView.svelte    URL probe, preset picker, advanced options, format
                        browser, playlist selection, add-to-queue
 QueueView.svelte       Queue rows: progress, pause/resume/cancel, groups, logs
-EditView.svelte        Edit tab: video/GIF → GIF. Source picker (Browse or
-                       drop a video/GIF onto the tab), trim/width/fps/dither,
-                       loop count, two-pass progress, and an "Append a clip"
-                       panel (concat a second clip's range onto the source)
+EditView.svelte        Edit tab shell with a GIF / Trim mode toggle. GIF mode:
+                       video/GIF → GIF (source picker via Browse or drop,
+                       trim/width/fps/dither, loop count, two-pass progress,
+                       "Append a clip" panel). Trim mode renders TrimView.
+TrimView.svelte        Trim & cut: source picker, scrub-preview thumbnail strip
+                       (click a frame → set a range's start/end), N ranges with
+                       separate-files / join export, lossless-copy vs re-encode
+                       badge driven by list_keyframes, force-re-encode toggle.
+                       Reuses the edit:// events + cancel_export.
 HistoryView.svelte     Completed downloads, open-folder / re-download
 PresetsView.svelte     Preset CRUD + archive file picker
 SettingsView.svelte    Binaries, notifications, update channel + check
@@ -139,7 +144,11 @@ download.rs   start/cancel/pause/resume download (delegates to ytdlp::runner)
 edit.rs       Edit tab: probe_media (ffprobe JSON), export_gif (two-pass
               palettegen → paletteuse with -progress pipe:1, loop flag),
               append_to_gif (concat two clips through one shared palette,
-              letterboxed to the base's dimensions), cancel_export.
+              letterboxed to the base's dimensions), list_keyframes (I-frame
+              timestamps for lossless-cut decisions), trim_video (single-range
+              cut, -c copy vs re-encode), trim_multi (N ranges → separate
+              files or concat-demuxer join), thumbnail_at (single-frame JPEG
+              data URI for the scrub strip; inlined base64), cancel_export.
               Events: edit://status, edit://progress, edit://log
 files.rs      read_dropped_text (size-capped URL-list reads)
 updater.rs    Channel-aware update check/install (stable vs nightly endpoint)

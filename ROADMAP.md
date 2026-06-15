@@ -224,13 +224,16 @@ channel end-to-end with a small surface area.
 
 ## Nightly 3 — Trim & cut
 
-- [ ] **Single-file trim** — pick start/end on a video scrubber, write
-      the cut. Use `-c copy` when both cuts land on keyframes, re-encode
-      otherwise (show user a "lossless / re-encoded" badge).
-- [ ] **Multi-range trim** — pick N ranges from a single source and
-      export them as separate files, or concat them into one.
-- [ ] **Scrub preview** — lightweight ffmpeg thumbnail generation
-      along the timeline so the user isn't trimming blind.
+- [x] **Single-file trim** — pick start/end on a video scrubber, write
+      the cut. Use `-c copy` when the start lands on a keyframe, re-encode
+      otherwise (shows the user a "lossless / re-encoded" badge, with a
+      "snap to keyframe" helper and a force-re-encode toggle).
+- [x] **Multi-range trim** — pick N ranges from a single source and
+      export them as separate files (`clip-1`, `clip-2`, …), or concat
+      them into one via the concat demuxer.
+- [x] **Scrub preview** — lightweight ffmpeg thumbnail generation
+      along the timeline (single-frame JPEG data URIs) so the user isn't
+      trimming blind; click a frame to set a range's start or end.
 
 ## Nightly 4 — Multi-clip concat
 
