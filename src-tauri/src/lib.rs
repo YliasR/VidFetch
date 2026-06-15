@@ -38,6 +38,7 @@ pub fn run() {
             commands::edit::export_gif,
             commands::edit::append_to_gif,
             commands::edit::list_keyframes,
+            commands::edit::thumbnail_at,
             commands::edit::trim_video,
             commands::edit::trim_multi,
             commands::edit::cancel_export,

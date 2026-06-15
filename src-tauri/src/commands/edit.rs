@@ -346,6 +346,83 @@ pub async fn list_keyframes(app: AppHandle, path: String) -> Result<Vec<f64>, St
     Ok(times)
 }
 
+/// Grab a single frame at `time` seconds and return it as a JPEG data URI.
+/// The Trim view lays these out along the timeline as a scrub strip so the
+/// user can see what they're cutting. Kept lightweight: fast-seek, one frame,
+/// scaled down, piped straight out of ffmpeg.
+#[tauri::command]
+pub async fn thumbnail_at(
+    app: AppHandle,
+    path: String,
+    time: f64,
+    width: Option<u32>,
+) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&path).exists() {
+        return Err(format!("file not found: {path}"));
+    }
+    let w = width.unwrap_or(240).max(16);
+
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.args(["-v", "error"]);
+    if time > 0.0 {
+        cmd.args(["-ss", &format!("{time}")]);
+    }
+    cmd.arg("-i")
+        .arg(&path)
+        .args(["-frames:v", "1", "-an"])
+        .arg("-vf")
+        .arg(format!("scale={w}:-2"))
+        .args(["-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "5", "pipe:1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::ytdlp::hide_console(&mut cmd);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ffmpeg: {e}"))?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!(
+            "could not extract frame: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(format!("data:image/jpeg;base64,{}", base64_encode(&output.stdout)))
+}
+
+/// Minimal standard-alphabet base64 encoder. Inlined so a thumbnail data URI
+/// needs no extra crate dependency.
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 /// Trim a single range out of a video. Returns a job id; progress arrives via
 /// `edit://*`, same as the GIF commands. `reencode` selects between a lossless
 /// stream-copy (`-c copy`) and a re-encode.

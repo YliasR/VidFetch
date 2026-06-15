@@ -31,6 +31,13 @@
   let jobId: string | null = null;
   let fraction = 0;
 
+  // Scrub strip: evenly-spaced thumbnails along the timeline.
+  const THUMB_COUNT = 12;
+  type Thumb = { time: number; url: string | null };
+  let thumbs: Thumb[] = [];
+  let thumbGen = 0; // bumped on each load so stale async fills are dropped
+  let activeRange = 0; // which range the scrub-strip buttons target
+
   let unlisteners: UnlistenFn[] = [];
 
   onMount(async () => {
@@ -88,6 +95,8 @@
     error = null;
     source = null;
     keyframes = [];
+    thumbs = [];
+    activeRange = 0;
     try {
       source = await ipc.probeMedia(path);
       ranges = [{ startText: '0:00', endText: source.duration != null ? formatTime(source.duration) : '' }];
@@ -96,6 +105,7 @@
       outputPath = defaultOutput(path);
       phase = 'ready';
       void loadKeyframes(path);
+      if (source.duration != null) void generateThumbs(path, source.duration);
     } catch (err) {
       phase = 'error';
       error = String(err);
@@ -113,6 +123,38 @@
     } finally {
       keyframesLoading = false;
     }
+  }
+
+  /** Extract evenly-spaced preview frames across the timeline. Tiles render
+   *  as placeholders immediately and fill in as each frame decodes. */
+  async function generateThumbs(path: string, duration: number) {
+    const gen = ++thumbGen;
+    const times = Array.from(
+      { length: THUMB_COUNT },
+      (_, i) => (duration * (i + 0.5)) / THUMB_COUNT,
+    );
+    thumbs = times.map((time) => ({ time, url: null }));
+    await Promise.all(
+      times.map(async (time, i) => {
+        try {
+          const url = await ipc.thumbnailAt(path, time, 200);
+          if (gen === thumbGen) thumbs[i] = { time, url };
+        } catch {
+          // leave the placeholder in place on failure
+        } finally {
+          if (gen === thumbGen) thumbs = thumbs;
+        }
+      }),
+    );
+  }
+
+  /** Assign a scrubbed timestamp to the active range's start or end. */
+  function applyThumb(time: number, edge: 'start' | 'end') {
+    if (trimming) return;
+    const idx = Math.min(activeRange, ranges.length - 1);
+    if (edge === 'start') ranges[idx].startText = formatTime(time);
+    else ranges[idx].endText = formatTime(time);
+    ranges = ranges;
   }
 
   /** Insert `-trim` before the extension so we don't clobber the source. */
@@ -299,12 +341,45 @@
 </div>
 
 {#if source}
+  {#if thumbs.length > 0}
+    <div class="card">
+      <div class="label">Scrub preview</div>
+      <div class="strip">
+        {#each thumbs as thumb (thumb.time)}
+          <div class="thumb">
+            {#if thumb.url}
+              <img src={thumb.url} alt={`Frame at ${formatTime(thumb.time)}`} />
+            {:else}
+              <div class="thumb-placeholder"></div>
+            {/if}
+            <span class="thumb-time">{formatTime(thumb.time)}</span>
+            <div class="thumb-actions">
+              <button on:click={() => applyThumb(thumb.time, 'start')} disabled={trimming}>Start</button>
+              <button on:click={() => applyThumb(thumb.time, 'end')} disabled={trimming}>End</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+      <span class="hint muted">
+        Hover a frame and set it as the {ranges.length > 1 ? `active range's ` : ''}start or end.
+      </span>
+    </div>
+  {/if}
+
   <div class="card">
     <div class="label">Ranges</div>
     {#each ranges as range, i (i)}
       <div class="range-row">
         {#if ranges.length > 1}
-          <span class="range-num">{i + 1}</span>
+          <button
+            class="range-num"
+            class:active={activeRange === i}
+            title="Make this the active range for the scrub strip"
+            on:click={() => (activeRange = i)}
+            disabled={trimming}
+          >
+            {i + 1}
+          </button>
         {/if}
         <label class="field">
           <span class="field-label">Start</span>
@@ -453,7 +528,7 @@
 
   .range-num {
     flex: 0 0 auto;
-    width: 20px;
+    width: 26px;
     height: 34px;
     display: flex;
     align-items: center;
@@ -461,6 +536,104 @@
     font-size: 12px;
     font-weight: 700;
     color: var(--fg-muted);
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .range-num.active {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .strip {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .thumb {
+    position: relative;
+    flex: 0 0 auto;
+    width: 100px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface-3);
+  }
+
+  .thumb img,
+  .thumb-placeholder {
+    display: block;
+    width: 100px;
+    height: 58px;
+    object-fit: cover;
+  }
+
+  .thumb-placeholder {
+    background: linear-gradient(
+      90deg,
+      var(--surface-3) 0%,
+      var(--surface-2) 50%,
+      var(--surface-3) 100%
+    );
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .thumb-time {
+    position: absolute;
+    bottom: 2px;
+    right: 3px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 0 4px;
+    border-radius: 3px;
+  }
+
+  .thumb-actions {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    opacity: 0;
+    background: rgba(0, 0, 0, 0.45);
+    transition: opacity 120ms ease;
+  }
+
+  .thumb:hover .thumb-actions {
+    opacity: 1;
+  }
+
+  .thumb-actions button {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border: none;
+    border-radius: 5px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .thumb-actions button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .range-row .field {

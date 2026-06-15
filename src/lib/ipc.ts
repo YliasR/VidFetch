@@ -105,6 +105,8 @@ export const ipc = {
   exportGif: (options: GifExportOptions) => invoke<string>('export_gif', { options }),
   appendToGif: (options: GifAppendOptions) => invoke<string>('append_to_gif', { options }),
   listKeyframes: (path: string) => invoke<number[]>('list_keyframes', { path }),
+  thumbnailAt: (path: string, time: number, width?: number) =>
+    invoke<string>('thumbnail_at', { path, time, width: width ?? null }),
   trimVideo: (options: TrimOptions) => invoke<string>('trim_video', { options }),
   trimMulti: (options: MultiTrimOptions) => invoke<string>('trim_multi', { options }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
