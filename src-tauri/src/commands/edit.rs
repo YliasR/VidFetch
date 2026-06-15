@@ -83,6 +83,26 @@ pub struct TrimOptions {
     pub reencode: bool,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimRange {
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiTrimOptions {
+    pub input_path: String,
+    pub ranges: Vec<TrimRange>,
+    /// "separate" writes one file per range; "concat" joins them into one.
+    pub mode: String,
+    /// For "concat": the single output file. For "separate": a base path whose
+    /// stem is suffixed per range (`clip.mp4` → `clip-1.mp4`, `clip-2.mp4`, …).
+    pub output_path: String,
+    pub reencode: bool,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EditStatus {
@@ -366,6 +386,54 @@ pub async fn trim_video(app: AppHandle, options: TrimOptions) -> Result<String, 
     Ok(id)
 }
 
+/// Trim multiple ranges out of one video, written either as separate files
+/// or concatenated into a single output. Returns a job id; progress via
+/// `edit://*`.
+#[tauri::command]
+pub async fn trim_multi(app: AppHandle, options: MultiTrimOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    if options.ranges.is_empty() {
+        return Err("no ranges selected".into());
+    }
+    if options.mode != "separate" && options.mode != "concat" {
+        return Err("mode must be 'separate' or 'concat'".into());
+    }
+    for r in &options.ranges {
+        if let (Some(start), Some(end)) = (r.start, r.end) {
+            if end <= start {
+                return Err("each range's end must be after its start".into());
+            }
+        }
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let id_for_task = id.clone();
+    let app_for_task = app.clone();
+
+    let task = tokio::spawn(async move {
+        run_trim_multi(app_for_task, id_for_task, ffmpeg, options).await;
+    });
+
+    let state = app.state::<AppState>();
+    state.jobs.lock().unwrap().insert(
+        id.clone(),
+        JobHandle {
+            task,
+            child_id: None,
+            paused: false,
+        },
+    );
+
+    emit_status(&app, &id, "queued", None);
+    Ok(id)
+}
+
 /// Append a video/GIF range onto an existing GIF and re-encode the whole
 /// thing as one GIF. Returns a job id; progress arrives via `edit://*`,
 /// same as `export_gif`, so the frontend reuses one event path.
@@ -587,28 +655,15 @@ async fn run_trim(app: AppHandle, id: String, ffmpeg: PathBuf, opts: TrimOptions
     };
 
     emit_status(&app, &id, "encoding", None);
-    let mut cmd = Command::new(&ffmpeg);
-    cmd.arg("-y");
-    // -ss before -i fast-seeks; on a re-encode it stays frame-accurate, and on
-    // a copy it lands on the keyframe the frontend already snapped the start to.
-    if start > 0.0 {
-        cmd.args(["-ss", &format!("{start}")]);
-    }
-    cmd.arg("-i").arg(&opts.input_path);
-    if let Some(end) = opts.end {
-        cmd.args(["-t", &format!("{}", (end - start).max(0.1))]);
-    }
-    if opts.reencode {
-        cmd.args([
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt",
-            "yuv420p", "-c:a", "aac", "-b:a", "192k",
-        ]);
-    } else {
-        // Stream-copy: no re-encode, so the cut is lossless and near-instant.
-        cmd.args(["-c", "copy"]);
-    }
-    cmd.args(["-progress", "pipe:1", "-nostats"]);
-    cmd.arg(&opts.output_path);
+    let cmd = build_trim_cmd(
+        &ffmpeg,
+        &opts.input_path,
+        start,
+        opts.end,
+        opts.reencode,
+        Path::new(&opts.output_path),
+        true,
+    );
 
     let result = run_pass(&app, &id, cmd, len).await;
     match result {
@@ -625,6 +680,160 @@ async fn run_trim(app: AppHandle, id: String, ffmpeg: PathBuf, opts: TrimOptions
             }
         }
     }
+}
+
+/// Build an ffmpeg cut command for one range. `-ss` before `-i` fast-seeks;
+/// on a re-encode it stays frame-accurate, and on a copy it lands on the
+/// keyframe the frontend snapped the start to.
+fn build_trim_cmd(
+    ffmpeg: &Path,
+    input: &str,
+    start: f64,
+    end: Option<f64>,
+    reencode: bool,
+    output: &Path,
+    progress: bool,
+) -> Command {
+    let mut cmd = Command::new(ffmpeg);
+    cmd.arg("-y");
+    if start > 0.0 {
+        cmd.args(["-ss", &format!("{start}")]);
+    }
+    cmd.arg("-i").arg(input);
+    if let Some(end) = end {
+        cmd.args(["-t", &format!("{}", (end - start).max(0.1))]);
+    }
+    if reencode {
+        cmd.args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt",
+            "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        ]);
+    } else {
+        // Stream-copy: no re-encode, so the cut is lossless and near-instant.
+        cmd.args(["-c", "copy"]);
+    }
+    if progress {
+        cmd.args(["-progress", "pipe:1", "-nostats"]);
+    }
+    cmd.arg(output);
+    cmd
+}
+
+/// `clip.mp4` + index 1 → `clip-1.mp4`. Index is 1-based for humans.
+fn indexed_output(base: &str, index: usize) -> String {
+    match base.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}-{index}.{ext}"),
+        None => format!("{base}-{index}"),
+    }
+}
+
+async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: MultiTrimOptions) {
+    let n = opts.ranges.len();
+    let outputs: Vec<String> = if opts.mode == "separate" {
+        (1..=n).map(|i| indexed_output(&opts.output_path, i)).collect()
+    } else {
+        // Concat: each range first goes to a temp segment, then we join them.
+        let ext = opts.output_path.rsplit_once('.').map(|(_, e)| e).unwrap_or("mp4");
+        (1..=n)
+            .map(|i| {
+                std::env::temp_dir()
+                    .join(format!("vidfetch-seg-{id}-{i}.{ext}"))
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    };
+
+    emit_status(&app, &id, "encoding", None);
+
+    // Cut each range. Per-segment progress would jump backwards, so we report
+    // a coarse fraction by completed segments instead.
+    for (i, range) in opts.ranges.iter().enumerate() {
+        let start = range.start.unwrap_or(0.0).max(0.0);
+        let cmd = build_trim_cmd(
+            &ffmpeg,
+            &opts.input_path,
+            start,
+            range.end,
+            opts.reencode,
+            Path::new(&outputs[i]),
+            false,
+        );
+        if let Err(e) = run_pass(&app, &id, cmd, None).await {
+            if still_tracked(&app, &id) {
+                finish(&app, &id, "error", Some(format!("range {} failed: {e}", i + 1)));
+            }
+            if opts.mode == "concat" {
+                cleanup(&outputs);
+            }
+            return;
+        }
+        // Cutting is the bulk of the work; leave a little headroom for concat.
+        let done = (i + 1) as f64 / n as f64;
+        emit_progress(&app, &id, if opts.mode == "concat" { done * 0.9 } else { done });
+    }
+
+    if opts.mode == "separate" {
+        finish(&app, &id, "done", Some(format!("{n} clips")));
+        return;
+    }
+
+    // Join the temp segments with the concat demuxer (stream copy — the
+    // segments are already in their final codec).
+    let list = std::env::temp_dir().join(format!("vidfetch-concat-{id}.txt"));
+    let body: String = outputs
+        .iter()
+        // The concat demuxer treats '\' as an escape; forward slashes are safe
+        // on Windows too.
+        .map(|p| format!("file '{}'\n", p.replace('\\', "/")))
+        .collect();
+    if let Err(e) = std::fs::write(&list, body) {
+        finish(&app, &id, "error", Some(format!("could not write concat list: {e}")));
+        cleanup(&outputs);
+        return;
+    }
+
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y")
+        .args(["-f", "concat", "-safe", "0"])
+        .arg("-i")
+        .arg(&list)
+        .args(["-c", "copy"])
+        .args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    let result = run_pass(&app, &id, cmd, None).await;
+
+    let _ = std::fs::remove_file(&list);
+    cleanup(&outputs);
+
+    match result {
+        Ok(()) => finish(&app, &id, "done", Some(opts.output_path.clone())),
+        Err(e) => {
+            if still_tracked(&app, &id) {
+                finish(&app, &id, "error", Some(format!("concat failed: {e}")));
+            }
+        }
+    }
+}
+
+fn cleanup(paths: &[String]) {
+    for p in paths {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+fn still_tracked(app: &AppHandle, id: &str) -> bool {
+    app.state::<AppState>().jobs.lock().unwrap().contains_key(id)
+}
+
+fn emit_progress(app: &AppHandle, id: &str, fraction: f64) {
+    let _ = app.emit(
+        "edit://progress",
+        EditProgress {
+            id: id.to_string(),
+            fraction: fraction.clamp(0.0, 1.0),
+        },
+    );
 }
 
 /// Per-input filter chain: resample to `fps`, fit inside `w`x`h` keeping

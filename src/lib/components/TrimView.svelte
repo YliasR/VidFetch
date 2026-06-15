@@ -4,7 +4,7 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { openPath } from '@tauri-apps/plugin-opener';
-  import { ipc, type MediaInfo } from '$lib/ipc';
+  import { ipc, type MediaInfo, type MultiTrimMode } from '$lib/ipc';
 
   /** Video containers the Trim view will load. GIFs go through the GIF tab. */
   const VIDEO_EXTS = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
@@ -14,6 +14,7 @@
   const KEYFRAME_EPSILON = 0.05;
 
   type Phase = 'idle' | 'probing' | 'ready' | 'encoding' | 'done' | 'error';
+  type Range = { startText: string; endText: string };
 
   let phase: Phase = 'idle';
   let source: MediaInfo | null = null;
@@ -22,8 +23,8 @@
   let keyframes: number[] = [];
   let keyframesLoading = false;
 
-  let startText = '0:00';
-  let endText = '';
+  let ranges: Range[] = [{ startText: '0:00', endText: '' }];
+  let exportMode: MultiTrimMode = 'separate';
   let forceReencode = false;
   let outputPath = '';
 
@@ -42,6 +43,7 @@
           else if (payload.status === 'done') {
             phase = 'done';
             fraction = 1;
+            doneMessage = payload.message;
           } else if (payload.status === 'error') {
             phase = 'error';
             error = payload.message ?? 'trim failed';
@@ -67,6 +69,8 @@
     for (const unlisten of unlisteners) unlisten();
   });
 
+  let doneMessage: string | null = null;
+
   async function pickSource() {
     const picked = await openDialog({
       multiple: false,
@@ -86,9 +90,9 @@
     keyframes = [];
     try {
       source = await ipc.probeMedia(path);
-      startText = '0:00';
-      endText = source.duration != null ? formatTime(source.duration) : '';
+      ranges = [{ startText: '0:00', endText: source.duration != null ? formatTime(source.duration) : '' }];
       forceReencode = false;
+      exportMode = 'separate';
       outputPath = defaultOutput(path);
       phase = 'ready';
       void loadKeyframes(path);
@@ -125,6 +129,14 @@
     if (typeof picked === 'string' && picked) outputPath = picked;
   }
 
+  function addRange() {
+    ranges = [...ranges, { startText: '', endText: '' }];
+  }
+
+  function removeRange(i: number) {
+    ranges = ranges.filter((_, idx) => idx !== i);
+  }
+
   /** Accepts plain seconds ("90", "12.5") or clock time ("1:30", "1:02:05.5"). */
   function parseTime(text: string): number | null {
     const clean = text.trim();
@@ -158,36 +170,43 @@
     return keyframes.some((k) => Math.abs(k - t) <= KEYFRAME_EPSILON);
   }
 
-  function snapStart() {
-    const t = start ?? 0;
+  function snapStart(i: number) {
+    const t = parseTime(ranges[i].startText) ?? 0;
     const k = keyframeAtOrBefore(t);
-    if (k != null) startText = formatTime(k);
+    if (k != null) {
+      ranges[i].startText = formatTime(k);
+      ranges = ranges; // trigger reactivity
+    }
   }
 
-  $: start = parseTime(startText);
-  $: end = parseTime(endText);
-  $: rangeError = validateRange(start, end);
+  $: parsed = ranges.map((r) => ({ start: parseTime(r.startText), end: parseTime(r.endText) }));
+  $: rangeError = validateRanges();
   $: trimming = phase === 'encoding';
-  $: startOnKeyframe = keyframes.length > 0 && isOnKeyframe(start ?? 0);
-  // Lossless when copying is safe (start on a keyframe) and the user hasn't
-  // forced a re-encode. Until keyframes load we can't promise lossless.
-  $: willBeLossless = !forceReencode && startOnKeyframe;
+  // Lossless only when every range's start lands on a keyframe and the user
+  // hasn't forced a re-encode. Until keyframes load we can't promise lossless.
+  $: allStartsOnKeyframe =
+    keyframes.length > 0 && parsed.every((p) => isOnKeyframe(p.start ?? 0));
+  $: willBeLossless = !forceReencode && allStartsOnKeyframe;
   $: reencode = !willBeLossless;
+  $: anyStartOffKeyframe =
+    keyframes.length > 0 && parsed.some((p) => !isOnKeyframe(p.start ?? 0));
 
-  $: canTrim =
-    source != null &&
-    !trimming &&
-    !!outputPath &&
-    rangeError == null;
+  $: canTrim = source != null && !trimming && !!outputPath && rangeError == null;
 
-  function validateRange(start: number | null, end: number | null): string | null {
-    if (startText.trim() && start == null) return 'Invalid start time';
-    if (endText.trim() && end == null) return 'Invalid end time';
-    if (start != null && end != null && end <= start) return 'End must be after start';
+  function validateRanges(): string | null {
     const duration = source?.duration;
-    if (duration != null) {
-      if (start != null && start >= duration) return 'Start is past the end of the video';
-      if (end != null && end > duration + 1) return 'End is past the end of the video';
+    for (let i = 0; i < ranges.length; i++) {
+      const { startText, endText } = ranges[i];
+      const start = parseTime(startText);
+      const end = parseTime(endText);
+      const tag = ranges.length > 1 ? `Range ${i + 1}: ` : '';
+      if (startText.trim() && start == null) return `${tag}invalid start time`;
+      if (endText.trim() && end == null) return `${tag}invalid end time`;
+      if (start != null && end != null && end <= start) return `${tag}end must be after start`;
+      if (duration != null) {
+        if (start != null && start >= duration) return `${tag}start is past the end of the video`;
+        if (end != null && end > duration + 1) return `${tag}end is past the end of the video`;
+      }
     }
     return null;
   }
@@ -196,14 +215,29 @@
     if (!source || !canTrim) return;
     error = null;
     fraction = 0;
+    doneMessage = null;
     try {
-      jobId = await ipc.trimVideo({
-        inputPath: source.path,
-        outputPath,
-        start: start && start > 0 ? start : null,
-        end: end ?? null,
-        reencode,
-      });
+      if (ranges.length === 1) {
+        const { start, end } = parsed[0];
+        jobId = await ipc.trimVideo({
+          inputPath: source.path,
+          outputPath,
+          start: start && start > 0 ? start : null,
+          end: end ?? null,
+          reencode,
+        });
+      } else {
+        jobId = await ipc.trimMulti({
+          inputPath: source.path,
+          ranges: parsed.map((p) => ({
+            start: p.start && p.start > 0 ? p.start : null,
+            end: p.end ?? null,
+          })),
+          mode: exportMode,
+          outputPath,
+          reencode,
+        });
+      }
       phase = 'encoding';
     } catch (err) {
       phase = 'error';
@@ -223,6 +257,14 @@
   function fileName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
   }
+
+  /** Human label for the output line: one file, N files, or a join. */
+  $: outputHint =
+    ranges.length === 1
+      ? null
+      : exportMode === 'separate'
+        ? `${ranges.length} files (suffixed -1, -2, …)`
+        : `1 file (ranges joined)`;
 </script>
 
 <div class="card">
@@ -258,17 +300,49 @@
 
 {#if source}
   <div class="card">
-    <div class="label">Trim range</div>
-    <div class="grid">
-      <label class="field">
-        <span class="field-label">Start</span>
-        <input class="input" type="text" bind:value={startText} placeholder="0:00" disabled={trimming} />
-      </label>
-      <label class="field">
-        <span class="field-label">End</span>
-        <input class="input" type="text" bind:value={endText} placeholder="end" disabled={trimming} />
-      </label>
+    <div class="label">Ranges</div>
+    {#each ranges as range, i (i)}
+      <div class="range-row">
+        {#if ranges.length > 1}
+          <span class="range-num">{i + 1}</span>
+        {/if}
+        <label class="field">
+          <span class="field-label">Start</span>
+          <input class="input" type="text" bind:value={range.startText} placeholder="0:00" disabled={trimming} />
+        </label>
+        <label class="field">
+          <span class="field-label">End</span>
+          <input class="input" type="text" bind:value={range.endText} placeholder="end" disabled={trimming} />
+        </label>
+        {#if ranges.length > 1}
+          <button
+            class="btn btn-sm btn-ghost remove"
+            title="Remove range"
+            on:click={() => removeRange(i)}
+            disabled={trimming}
+          >
+            ✕
+          </button>
+        {/if}
+      </div>
+    {/each}
+
+    <div class="ranges-actions">
+      <button class="btn btn-sm" on:click={addRange} disabled={trimming}>+ Add range</button>
+      {#if ranges.length > 1}
+        <div class="export-mode">
+          <label class="radio">
+            <input type="radio" bind:group={exportMode} value="separate" disabled={trimming} />
+            <span>Separate files</span>
+          </label>
+          <label class="radio">
+            <input type="radio" bind:group={exportMode} value="concat" disabled={trimming} />
+            <span>Join into one</span>
+          </label>
+        </div>
+      {/if}
     </div>
+
     {#if rangeError}
       <div class="error"><code>{rangeError}</code></div>
     {/if}
@@ -282,11 +356,15 @@
         <span class="badge reencode">Re-encoded</span>
       {/if}
 
-      {#if !keyframesLoading && keyframes.length > 0 && !startOnKeyframe && !forceReencode}
-        <button class="btn btn-sm" on:click={snapStart} disabled={trimming}>
-          Snap start to keyframe
-        </button>
-        <span class="hint muted">Start isn't on a keyframe, so the cut is re-encoded.</span>
+      {#if !keyframesLoading && anyStartOffKeyframe && !forceReencode}
+        <span class="hint muted">
+          {ranges.length > 1 ? 'Some starts' : 'Start'} not on a keyframe — re-encoded for accuracy.
+        </span>
+        {#if ranges.length === 1}
+          <button class="btn btn-sm" on:click={() => snapStart(0)} disabled={trimming}>
+            Snap to keyframe
+          </button>
+        {/if}
       {/if}
     </div>
 
@@ -302,6 +380,9 @@
       <input class="input mono" type="text" bind:value={outputPath} disabled={trimming} />
       <button class="btn" on:click={pickOutput} disabled={trimming}>Browse</button>
     </div>
+    {#if outputHint}
+      <span class="hint muted">{outputHint}</span>
+    {/if}
 
     <div class="export-row">
       {#if trimming}
@@ -317,7 +398,7 @@
           {willBeLossless ? 'Trim (lossless)' : 'Trim'}
         </button>
         {#if phase === 'done'}
-          <span class="done-text">Saved {fileName(outputPath)}</span>
+          <span class="done-text">Saved {doneMessage ?? fileName(outputPath)}</span>
           <button class="btn" on:click={revealOutput}>Open folder</button>
         {/if}
       {/if}
@@ -364,10 +445,55 @@
     opacity: 0.6;
   }
 
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  .range-row {
+    display: flex;
+    align-items: flex-end;
     gap: 12px;
+  }
+
+  .range-num {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--fg-muted);
+  }
+
+  .range-row .field {
+    flex: 1;
+  }
+
+  .remove {
+    flex: 0 0 auto;
+    color: var(--danger);
+  }
+
+  .ranges-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .export-mode {
+    display: flex;
+    gap: 14px;
+  }
+
+  .radio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .radio input {
+    accent-color: var(--accent);
   }
 
   .field {

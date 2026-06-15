@@ -72,6 +72,21 @@ export interface TrimOptions {
   reencode: boolean;
 }
 
+export interface TrimRange {
+  start: number | null;
+  end: number | null;
+}
+
+export type MultiTrimMode = 'separate' | 'concat';
+
+export interface MultiTrimOptions {
+  inputPath: string;
+  ranges: TrimRange[];
+  mode: MultiTrimMode;
+  outputPath: string;
+  reencode: boolean;
+}
+
 export const ipc = {
   checkBinaries: () => invoke<BinariesStatus>('check_binaries'),
   installYtdlp: () => invoke<string>('install_ytdlp'),
@@ -91,6 +106,7 @@ export const ipc = {
   appendToGif: (options: GifAppendOptions) => invoke<string>('append_to_gif', { options }),
   listKeyframes: (path: string) => invoke<number[]>('list_keyframes', { path }),
   trimVideo: (options: TrimOptions) => invoke<string>('trim_video', { options }),
+  trimMulti: (options: MultiTrimOptions) => invoke<string>('trim_multi', { options }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
 
   checkAppUpdate: (channel: string) =>
