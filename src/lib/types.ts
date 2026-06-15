@@ -59,7 +59,7 @@ export type CookiesSource = 'none' | 'browser' | 'file';
 
 export type ConflictMode = 'skip' | 'overwrite';
 
-export type OutputFormat = 'auto' | 'mp4' | 'mkv' | 'webm';
+export type OutputFormat = 'auto' | 'mp4' | 'mkv' | 'webm' | 'gif';
 
 export interface DownloadOptions {
   url: string;
@@ -91,6 +91,13 @@ export interface DownloadOptions {
 
   /** Exact -f selector from the format browser; overrides the preset. */
   formatSelector?: string | null;
+
+  // GIF conversion options (used when outputFormat === 'gif')
+  gifStart?: string | null;
+  gifEnd?: string | null;
+  gifWidth?: number | null;
+  gifFps?: number | null;
+  gifDither?: string | null;
 }
 
 export type DownloadStatusKind =

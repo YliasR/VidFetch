@@ -98,8 +98,10 @@ MainPane.svelte        View switch on $currentView
 DownloadView.svelte    URL probe, preset picker, advanced options, format
                        browser, playlist selection, add-to-queue
 QueueView.svelte       Queue rows: progress, pause/resume/cancel, groups, logs
-EditView.svelte        Edit tab (Nightly 1): video → GIF export — source
-                       picker, trim/width/fps/dither, two-pass progress
+EditView.svelte        Edit tab: video/GIF → GIF. Source picker (Browse or
+                       drop a video/GIF onto the tab), trim/width/fps/dither,
+                       loop count, two-pass progress, and an "Append a clip"
+                       panel (concat a second clip's range onto the source)
 HistoryView.svelte     Completed downloads, open-folder / re-download
 PresetsView.svelte     Preset CRUD + archive file picker
 SettingsView.svelte    Binaries, notifications, update channel + check
@@ -135,7 +137,9 @@ ytdlp.rs      check_binaries / install_ytdlp / install_ffmpeg / get_versions
 probe.rs      probe_url: yt-dlp -J → discriminated Single/Playlist result
 download.rs   start/cancel/pause/resume download (delegates to ytdlp::runner)
 edit.rs       Edit tab: probe_media (ffprobe JSON), export_gif (two-pass
-              palettegen → paletteuse with -progress pipe:1), cancel_export.
+              palettegen → paletteuse with -progress pipe:1, loop flag),
+              append_to_gif (concat two clips through one shared palette,
+              letterboxed to the base's dimensions), cancel_export.
               Events: edit://status, edit://progress, edit://log
 files.rs      read_dropped_text (size-capped URL-list reads)
 updater.rs    Channel-aware update check/install (stable vs nightly endpoint)

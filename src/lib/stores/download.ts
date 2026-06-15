@@ -43,6 +43,13 @@ export interface AdvancedOptions {
   embedChapters: boolean;
 
   outputFormat: OutputFormat;
+
+  // GIF conversion options (used when outputFormat === 'gif')
+  gifStart: string; // start time for trimming
+  gifEnd: string;   // end time for trimming  
+  gifWidth: number; // output width in pixels
+  gifFps: number;   // output fps
+  gifDither: string; // dithering algorithm
 }
 
 export interface DownloadState {
@@ -92,6 +99,13 @@ const defaultAdvanced: AdvancedOptions = {
   embedChapters: false,
 
   outputFormat: 'auto',
+
+  // GIF conversion defaults
+  gifStart: '',
+  gifEnd: '',
+  gifWidth: 480,
+  gifFps: 15,
+  gifDither: 'sierra2_4a',
 };
 
 const initial: DownloadState = {

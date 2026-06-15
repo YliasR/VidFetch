@@ -129,6 +129,7 @@
     { id: 'mp4', label: 'MP4', note: 'Discord / iOS safe' },
     { id: 'mkv', label: 'MKV', note: 'Lossless merge' },
     { id: 'webm', label: 'WebM', note: 'Smaller, VP9/Opus' },
+    { id: 'gif', label: 'GIF', note: 'Animated GIF (converted after download)' },
   ];
 
   const templatePresets: { label: string; template: string }[] = [
@@ -278,6 +279,12 @@
           ? activeSavedPreset.archivePath
           : null,
       formatSelector: selectedFormat ? selectorFor(selectedFormat) : null,
+      // GIF conversion options
+      gifStart: adv.gifStart || null,
+      gifEnd: adv.gifEnd || null,
+      gifWidth: adv.gifWidth > 0 ? adv.gifWidth : null,
+      gifFps: adv.gifFps > 0 ? adv.gifFps : null,
+      gifDither: adv.gifDither || null,
     };
   }
 
@@ -976,6 +983,73 @@
               </label>
             </div>
           </div>
+
+          <!-- GIF conversion settings -->
+          {#if adv.outputFormat === 'gif'}
+            <div class="section">
+              <div class="label">GIF conversion settings</div>
+              <div class="grid-4">
+                <label class="field">
+                  <span class="field-label">Start</span>
+                  <input
+                    class="input small"
+                    type="text"
+                    placeholder="0:00"
+                    value={adv.gifStart}
+                    on:change={(e) => updateAdvanced({ gifStart: (e.target as HTMLInputElement).value })}
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">End</span>
+                  <input
+                    class="input small"
+                    type="text"
+                    placeholder="end"
+                    value={adv.gifEnd}
+                    on:change={(e) => updateAdvanced({ gifEnd: (e.target as HTMLInputElement).value })}
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">Width (px)</span>
+                  <input
+                    class="input small"
+                    type="number"
+                    min="16"
+                    max="3840"
+                    value={adv.gifWidth}
+                    on:change={(e) => {
+                      const n = parseInt((e.target as HTMLInputElement).value, 10);
+                      updateAdvanced({ gifWidth: Number.isNaN(n) ? 480 : Math.max(16, Math.min(3840, n || 480)) });
+                    }}
+                  />
+                </label>
+                <label class="field">
+                  <span class="field-label">FPS</span>
+                  <input
+                    class="input small"
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={adv.gifFps}
+                    on:change={(e) => {
+                      const n = parseInt((e.target as HTMLInputElement).value, 10);
+                      updateAdvanced({ gifFps: Number.isNaN(n) ? 15 : Math.max(1, Math.min(60, n || 15)) });
+                    }}
+                  />
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">Dithering</span>
+                <select class="input small" value={adv.gifDither} on:change={(e) => updateAdvanced({ gifDither: (e.target as HTMLSelectElement).value })}>
+                  <option value="sierra2_4a">Sierra (default)</option>
+                  <option value="floyd_steinberg">Floyd–Steinberg</option>
+                  <option value="bayer">Bayer (patterned)</option>
+                  <option value="none">None (smallest file)</option>
+                </select>
+              </label>
+              <p class="muted small">Video will be downloaded first, then converted to GIF. Progress will show "Converting to GIF" after download completes.</p>
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -1572,6 +1646,12 @@
   .grid-3 {
     display: grid;
     grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+  }
+
+  .grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: 10px;
   }
 

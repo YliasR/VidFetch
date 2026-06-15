@@ -44,6 +44,23 @@ export interface GifExportOptions {
   width: number | null;
   fps: number;
   dither: GifDither;
+  /** 0 = loop forever, -1 = play once, n = loop n extra times. */
+  loopCount: number | null;
+}
+
+export type GifAppendPosition = 'front' | 'back';
+
+export interface GifAppendOptions {
+  basePath: string;
+  clipPath: string;
+  clipStart: number | null;
+  clipEnd: number | null;
+  position: GifAppendPosition;
+  outputPath: string;
+  width: number | null;
+  fps: number;
+  dither: GifDither;
+  loopCount: number | null;
 }
 
 export const ipc = {
@@ -62,6 +79,7 @@ export const ipc = {
 
   probeMedia: (path: string) => invoke<MediaInfo>('probe_media', { path }),
   exportGif: (options: GifExportOptions) => invoke<string>('export_gif', { options }),
+  appendToGif: (options: GifAppendOptions) => invoke<string>('append_to_gif', { options }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
 
   checkAppUpdate: (channel: string) =>

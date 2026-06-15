@@ -56,6 +56,18 @@ pub struct DownloadOptions {
     /// subtitles, embedding — still applies).
     #[serde(default)]
     pub format_selector: Option<String>,
+
+    // GIF conversion options (used when output_format == OutputFormat::Gif)
+    #[serde(default)]
+    pub gif_start: Option<String>,
+    #[serde(default)]
+    pub gif_end: Option<String>,
+    #[serde(default)]
+    pub gif_width: Option<u32>,
+    #[serde(default)]
+    pub gif_fps: Option<f64>,
+    #[serde(default)]
+    pub gif_dither: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -110,6 +122,11 @@ fn build_format_selector(preset: QualityPreset, fmt: OutputFormat) -> String {
         OutputFormat::Webm => format!(
             "bv*{hf}[vcodec^=vp9]+ba[acodec^=opus]/bv*{hf}+ba/b{hf}"
         ),
+        // GIF: we download a video first, then convert to GIF, so pick a video format.
+        // Prefer H.264 for broader compatibility during the download.
+        OutputFormat::Gif => format!(
+            "bv*{hf}[vcodec^=avc1]+ba[acodec^=mp4a]/bv*{hf}+ba/b{hf}"
+        ),
         // Auto and MKV: just take the best available — MKV accepts anything.
         OutputFormat::Auto | OutputFormat::Mkv => format!("bv*{hf}+ba/b{hf}"),
     }
@@ -154,6 +171,8 @@ pub enum OutputFormat {
     Mkv,
     /// WebM container. Smaller files, VP9/Opus-friendly, no Safari support.
     Webm,
+    /// GIF format - downloads as video then converts to animated GIF.
+    Gif,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -238,6 +257,11 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
             OutputFormat::Webm => {
                 args.push("--merge-output-format".into());
                 args.push("webm".into());
+            }
+            OutputFormat::Gif => {
+                // For GIF, we download as mp4 first, then convert to GIF post-download.
+                args.push("--merge-output-format".into());
+                args.push("mp4".into());
             }
         }
     }

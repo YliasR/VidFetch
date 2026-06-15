@@ -214,11 +214,11 @@ channel end-to-end with a small surface area.
       two-pass GIF pipeline converts it as a post-step (reusing the
       Edit tab's trim/width/fps/dither settings). Queue progress shows
       a distinct "converting to GIF" phase.
-- [ ] **Import existing GIF** — drop a `.gif` into the Edit tab to
+- [x] **Import existing GIF** — drop a `.gif` into the Edit tab to
       load it as a source clip (treated the same as a video internally).
-- [ ] **Re-edit imported GIF** — trim, resize, frame-drop to lower fps,
+- [x] **Re-edit imported GIF** — trim, resize, frame-drop to lower fps,
       change loop count, or re-optimize the palette.
-- [ ] **Append video range to GIF** — take an existing GIF and tack a
+- [x] **Append video range to GIF** — take an existing GIF and tack a
       range from a video onto the end (or front) with a matched
       palette to avoid color-wash.
 
