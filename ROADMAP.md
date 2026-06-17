@@ -237,12 +237,14 @@ channel end-to-end with a small surface area.
 
 ## Nightly 4 — Multi-clip concat
 
-- [ ] **Drag-and-drop clip list** — order a list of local files in the
+- [x] **Drag-and-drop clip list** — order a list of local files in the
       Edit tab, preview the sequence, write a single output.
-- [ ] **Fast path** (same codec/resolution/fps) — concat demuxer, no
-      re-encode.
-- [ ] **Slow path** (mixed sources) — concat filter with an ffmpeg
-      normalize pass so resolution/fps/audio-rate match.
+- [x] **Fast path** (same codec/resolution/fps) — concat demuxer, no
+      re-encode. Auto-selected when a probe of every clip finds matching
+      codec/resolution/pixel-format/fps/audio.
+- [x] **Slow path** (mixed sources) — concat filter with an ffmpeg
+      normalize pass so resolution/fps/audio-rate match. The UI shows a
+      "fast copy" vs "re-encode" badge (via `plan_concat`) before starting.
 
 ## Nightly 5 — Audio ops
 

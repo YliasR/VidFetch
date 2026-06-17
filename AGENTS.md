@@ -147,8 +147,13 @@ edit.rs       Edit tab: probe_media (ffprobe JSON), export_gif (two-pass
               letterboxed to the base's dimensions), list_keyframes (I-frame
               timestamps for lossless-cut decisions), trim_video (single-range
               cut, -c copy vs re-encode), trim_multi (N ranges → separate
-              files or concat-demuxer join), thumbnail_at (single-frame JPEG
-              data URI for the scrub strip; inlined base64), cancel_export.
+              files or concat-demuxer join), concat_clips (join N local clips:
+              probes all, fast path = concat demuxer stream-copy when
+              codec/res/pix_fmt/fps/audio all match, else slow path = concat
+              filter normalize + re-encode), plan_concat (dry-run the above to
+              tell the UI "copy" vs "reencode" + reason), thumbnail_at
+              (single-frame JPEG data URI for the scrub strip; inlined base64),
+              cancel_export.
               Events: edit://status, edit://progress, edit://log
 files.rs      read_dropped_text (size-capped URL-list reads)
 updater.rs    Channel-aware update check/install (stable vs nightly endpoint)

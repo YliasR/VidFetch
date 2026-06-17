@@ -41,6 +41,8 @@ pub fn run() {
             commands::edit::thumbnail_at,
             commands::edit::trim_video,
             commands::edit::trim_multi,
+            commands::edit::concat_clips,
+            commands::edit::plan_concat,
             commands::edit::cancel_export,
             commands::updater::check_app_update,
             commands::updater::install_app_update,

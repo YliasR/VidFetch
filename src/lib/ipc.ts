@@ -87,6 +87,18 @@ export interface MultiTrimOptions {
   reencode: boolean;
 }
 
+export interface ConcatClipsOptions {
+  inputPaths: string[];
+  outputPath: string;
+}
+
+export interface ConcatPlan {
+  /** 'copy' = fast concat demuxer; 'reencode' = normalize pass for mixed sources. */
+  mode: 'copy' | 'reencode';
+  /** Why a re-encode is needed, or null when copying. */
+  reason: string | null;
+}
+
 export const ipc = {
   checkBinaries: () => invoke<BinariesStatus>('check_binaries'),
   installYtdlp: () => invoke<string>('install_ytdlp'),
@@ -109,6 +121,10 @@ export const ipc = {
     invoke<string>('thumbnail_at', { path, time, width: width ?? null }),
   trimVideo: (options: TrimOptions) => invoke<string>('trim_video', { options }),
   trimMulti: (options: MultiTrimOptions) => invoke<string>('trim_multi', { options }),
+  concatClips: (options: ConcatClipsOptions) =>
+    invoke<string>('concat_clips', { options }),
+  planConcat: (inputPaths: string[]) =>
+    invoke<ConcatPlan>('plan_concat', { inputPaths }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
 
   checkAppUpdate: (channel: string) =>

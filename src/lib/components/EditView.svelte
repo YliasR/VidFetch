@@ -5,10 +5,11 @@
   import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { openPath } from '@tauri-apps/plugin-opener';
   import { ipc, type MediaInfo, type GifDither, type GifAppendPosition } from '$lib/ipc';
+  import ConcatView from './ConcatView.svelte';
   import TrimView from './TrimView.svelte';
 
-  /** Edit tab sub-modes: video→GIF studio vs. trim & cut. */
-  type EditMode = 'gif' | 'trim';
+  /** Edit tab sub-modes: video→GIF studio, trim & cut, and multi-clip concat. */
+  type EditMode = 'gif' | 'trim' | 'concat';
   let mode: EditMode = 'gif';
 
   /** Extensions the Edit tab will load as a source clip (video or GIF). */
@@ -283,9 +284,11 @@
       {#if mode === 'gif'}
         Turn a video into a GIF, re-edit an existing GIF, or append a clip onto one. Drop a video or
         GIF anywhere on this tab to load it.
-      {:else}
+      {:else if mode === 'trim'}
         Cut a range out of a video — lossless when the start lands on a keyframe, re-encoded
         otherwise. Drop a video anywhere on this tab to load it.
+      {:else}
+        Arrange local clips into a sequence, preview the order, and write one joined output.
       {/if}
     </p>
     <div class="modes" role="tablist">
@@ -307,11 +310,22 @@
       >
         Trim &amp; cut
       </button>
+      <button
+        class="mode-tab"
+        class:active={mode === 'concat'}
+        role="tab"
+        aria-selected={mode === 'concat'}
+        on:click={() => (mode = 'concat')}
+      >
+        Concat
+      </button>
     </div>
   </header>
 
   {#if mode === 'trim'}
     <TrimView />
+  {:else if mode === 'concat'}
+    <ConcatView />
   {:else}
   <div class="card">
     <div class="label">Source</div>

@@ -103,6 +103,40 @@ pub struct MultiTrimOptions {
     pub reencode: bool,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConcatClipsOptions {
+    pub input_paths: Vec<String>,
+    pub output_path: String,
+}
+
+/// What `concat_clips` will do with the current clip set, surfaced to the UI so
+/// it can show a "fast copy" vs "re-encode" badge before the user commits.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConcatPlan {
+    /// "copy" = concat demuxer, stream copy (instant, lossless).
+    /// "reencode" = concat filter with a normalize pass (mixed sources).
+    pub mode: &'static str,
+    /// Why a re-encode is needed (first mismatch found), or None when copying.
+    pub reason: Option<String>,
+}
+
+/// Video/audio stream parameters used to decide concat compatibility. Probed
+/// per clip with ffprobe `-show_streams`.
+struct ClipParams {
+    duration: Option<f64>,
+    v_codec: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    fps: Option<f64>,
+    pix_fmt: Option<String>,
+    has_audio: bool,
+    a_codec: Option<String>,
+    sample_rate: Option<u32>,
+    channels: Option<u32>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EditStatus {
@@ -376,7 +410,15 @@ pub async fn thumbnail_at(
         .args(["-frames:v", "1", "-an"])
         .arg("-vf")
         .arg(format!("scale={w}:-2"))
-        .args(["-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "5", "pipe:1"])
+        .args([
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-q:v",
+            "5",
+            "pipe:1",
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -393,14 +435,16 @@ pub async fn thumbnail_at(
         ));
     }
 
-    Ok(format!("data:image/jpeg;base64,{}", base64_encode(&output.stdout)))
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        base64_encode(&output.stdout)
+    ))
 }
 
 /// Minimal standard-alphabet base64 encoder. Inlined so a thumbnail data URI
 /// needs no extra crate dependency.
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0];
@@ -511,6 +555,70 @@ pub async fn trim_multi(app: AppHandle, options: MultiTrimOptions) -> Result<Str
     Ok(id)
 }
 
+/// Join a user-ordered list of local clips into one output. This first
+/// Nightly 4 slice uses ffmpeg's concat demuxer, so it is fastest and most
+/// reliable when the sources already share compatible codecs/parameters.
+#[tauri::command]
+pub async fn concat_clips(app: AppHandle, options: ConcatClipsOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if options.input_paths.len() < 2 {
+        return Err("select at least two clips".into());
+    }
+    if options.output_path.trim().is_empty() {
+        return Err("choose an output path".into());
+    }
+    for path in &options.input_paths {
+        if !Path::new(path).exists() {
+            return Err(format!("file not found: {path}"));
+        }
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let id_for_task = id.clone();
+    let app_for_task = app.clone();
+
+    let task = tokio::spawn(async move {
+        run_concat_clips(app_for_task, id_for_task, ffmpeg, options).await;
+    });
+
+    let state = app.state::<AppState>();
+    state.jobs.lock().unwrap().insert(
+        id.clone(),
+        JobHandle {
+            task,
+            child_id: None,
+            paused: false,
+        },
+    );
+
+    emit_status(&app, &id, "queued", None);
+    Ok(id)
+}
+
+/// Probe the clip set and report which concat path `concat_clips` would take,
+/// without doing any work. The Concat view calls this when the list changes to
+/// show whether the join is a fast stream-copy or a normalize re-encode.
+#[tauri::command]
+pub async fn plan_concat(app: AppHandle, input_paths: Vec<String>) -> Result<ConcatPlan, String> {
+    if input_paths.len() < 2 {
+        return Err("select at least two clips".into());
+    }
+    let params = probe_all(&app, &input_paths).await?;
+    Ok(match concat_incompatibility(&params) {
+        None => ConcatPlan {
+            mode: "copy",
+            reason: None,
+        },
+        Some(reason) => ConcatPlan {
+            mode: "reencode",
+            reason: Some(reason),
+        },
+    })
+}
+
 /// Append a video/GIF range onto an existing GIF and re-encode the whole
 /// thing as one GIF. Returns a job id; progress arrives via `edit://*`,
 /// same as `export_gif`, so the frontend reuses one event path.
@@ -585,7 +693,12 @@ async fn run_export(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifExport
         .arg(palette.as_os_str());
     if let Err(e) = run_pass(&app, &id, cmd, None).await {
         let _ = std::fs::remove_file(&palette);
-        finish(&app, &id, "error", Some(format!("palette pass failed: {e}")));
+        finish(
+            &app,
+            &id,
+            "error",
+            Some(format!("palette pass failed: {e}")),
+        );
         return;
     }
 
@@ -633,14 +746,24 @@ async fn run_append(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifAppend
     let base = match probe_media(app.clone(), opts.base_path.clone()).await {
         Ok(b) => b,
         Err(e) => {
-            finish(&app, &id, "error", Some(format!("could not read base: {e}")));
+            finish(
+                &app,
+                &id,
+                "error",
+                Some(format!("could not read base: {e}")),
+            );
             return;
         }
     };
     let (base_w, base_h) = match (base.width, base.height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => (w, h),
         _ => {
-            finish(&app, &id, "error", Some("base file has no video dimensions".into()));
+            finish(
+                &app,
+                &id,
+                "error",
+                Some("base file has no video dimensions".into()),
+            );
             return;
         }
     };
@@ -663,7 +786,11 @@ async fn run_append(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifAppend
     let base_chain = scaled_input(0, "b", opts.fps, target_w, target_h);
     let clip_chain = scaled_input(1, "c", opts.fps, target_w, target_h);
     // "front" puts the appended clip first; "back" puts it after the base.
-    let order = if opts.position == "front" { "[c][b]" } else { "[b][c]" };
+    let order = if opts.position == "front" {
+        "[c][b]"
+    } else {
+        "[b][c]"
+    };
 
     // Pass 1 — one palette derived from the whole concatenated stream.
     emit_status(&app, &id, "palette", None);
@@ -680,7 +807,12 @@ async fn run_append(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifAppend
         .arg(palette.as_os_str());
     if let Err(e) = run_pass(&app, &id, cmd, None).await {
         let _ = std::fs::remove_file(&palette);
-        finish(&app, &id, "error", Some(format!("palette pass failed: {e}")));
+        finish(
+            &app,
+            &id,
+            "error",
+            Some(format!("palette pass failed: {e}")),
+        );
         return;
     }
 
@@ -782,8 +914,8 @@ fn build_trim_cmd(
     }
     if reencode {
         cmd.args([
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt",
-            "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a",
+            "aac", "-b:a", "192k",
         ]);
     } else {
         // Stream-copy: no re-encode, so the cut is lossless and near-instant.
@@ -807,10 +939,16 @@ fn indexed_output(base: &str, index: usize) -> String {
 async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: MultiTrimOptions) {
     let n = opts.ranges.len();
     let outputs: Vec<String> = if opts.mode == "separate" {
-        (1..=n).map(|i| indexed_output(&opts.output_path, i)).collect()
+        (1..=n)
+            .map(|i| indexed_output(&opts.output_path, i))
+            .collect()
     } else {
         // Concat: each range first goes to a temp segment, then we join them.
-        let ext = opts.output_path.rsplit_once('.').map(|(_, e)| e).unwrap_or("mp4");
+        let ext = opts
+            .output_path
+            .rsplit_once('.')
+            .map(|(_, e)| e)
+            .unwrap_or("mp4");
         (1..=n)
             .map(|i| {
                 std::env::temp_dir()
@@ -838,7 +976,12 @@ async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: Multi
         );
         if let Err(e) = run_pass(&app, &id, cmd, None).await {
             if still_tracked(&app, &id) {
-                finish(&app, &id, "error", Some(format!("range {} failed: {e}", i + 1)));
+                finish(
+                    &app,
+                    &id,
+                    "error",
+                    Some(format!("range {} failed: {e}", i + 1)),
+                );
             }
             if opts.mode == "concat" {
                 cleanup(&outputs);
@@ -847,7 +990,15 @@ async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: Multi
         }
         // Cutting is the bulk of the work; leave a little headroom for concat.
         let done = (i + 1) as f64 / n as f64;
-        emit_progress(&app, &id, if opts.mode == "concat" { done * 0.9 } else { done });
+        emit_progress(
+            &app,
+            &id,
+            if opts.mode == "concat" {
+                done * 0.9
+            } else {
+                done
+            },
+        );
     }
 
     if opts.mode == "separate" {
@@ -865,7 +1016,12 @@ async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: Multi
         .map(|p| format!("file '{}'\n", p.replace('\\', "/")))
         .collect();
     if let Err(e) = std::fs::write(&list, body) {
-        finish(&app, &id, "error", Some(format!("could not write concat list: {e}")));
+        finish(
+            &app,
+            &id,
+            "error",
+            Some(format!("could not write concat list: {e}")),
+        );
         cleanup(&outputs);
         return;
     }
@@ -893,6 +1049,303 @@ async fn run_trim_multi(app: AppHandle, id: String, ffmpeg: PathBuf, opts: Multi
     }
 }
 
+async fn run_concat_clips(app: AppHandle, id: String, ffmpeg: PathBuf, opts: ConcatClipsOptions) {
+    // Probe every clip up front so we can choose: identical streams take the
+    // fast path (concat demuxer, stream copy); mixed sources take the slow path
+    // (concat filter with a scale/fps/audio normalize pass).
+    let params = match probe_all(&app, &opts.input_paths).await {
+        Ok(p) => p,
+        Err(e) => {
+            finish(&app, &id, "error", Some(e));
+            return;
+        }
+    };
+    let total = total_from_params(&params);
+
+    emit_status(&app, &id, "encoding", None);
+    let result = if concat_incompatibility(&params).is_none() {
+        concat_copy(&app, &id, &ffmpeg, &opts, total).await
+    } else {
+        concat_reencode(&app, &id, &ffmpeg, &opts, &params, total).await
+    };
+
+    match result {
+        Ok(()) => finish(&app, &id, "done", Some(opts.output_path.clone())),
+        Err(e) => {
+            if still_tracked(&app, &id) {
+                finish(&app, &id, "error", Some(format!("concat failed: {e}")));
+            }
+        }
+    }
+}
+
+/// Fast path: join clips with the concat demuxer and stream-copy. Near-instant
+/// and lossless, but only valid when every clip shares codec/resolution/fps.
+async fn concat_copy(
+    app: &AppHandle,
+    id: &str,
+    ffmpeg: &Path,
+    opts: &ConcatClipsOptions,
+    total: Option<f64>,
+) -> anyhow::Result<()> {
+    let list = std::env::temp_dir().join(format!("vidfetch-clip-list-{id}.txt"));
+    let body: String = opts
+        .input_paths
+        .iter()
+        .map(|p| format!("file '{}'\n", concat_list_path(p)))
+        .collect();
+    std::fs::write(&list, body)?;
+
+    let mut cmd = Command::new(ffmpeg);
+    cmd.arg("-y")
+        .args(["-f", "concat", "-safe", "0"])
+        .arg("-i")
+        .arg(&list)
+        .args(["-c", "copy"])
+        .args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    let result = run_pass(app, id, cmd, total).await;
+    let _ = std::fs::remove_file(&list);
+    result
+}
+
+/// Slow path: normalize every clip to a common box/fps (and a common audio
+/// layout when all clips carry audio), then join them with the concat filter
+/// and re-encode. Handles mixed resolutions, frame rates, and codecs.
+async fn concat_reencode(
+    app: &AppHandle,
+    id: &str,
+    ffmpeg: &Path,
+    opts: &ConcatClipsOptions,
+    params: &[ClipParams],
+    total: Option<f64>,
+) -> anyhow::Result<()> {
+    let n = opts.input_paths.len();
+    let (w, h) = target_box(params);
+    let fps = target_fps(params);
+    // Audio survives the join only when every clip has a track; mixing
+    // some-audio / some-silent segments through the concat filter needs
+    // generated silence we don't build yet, so we drop audio in that case.
+    let with_audio = params.iter().all(|p| p.has_audio);
+    let sample_rate = target_sample_rate(params);
+
+    let mut graph = String::new();
+    let mut joins = String::new();
+    for i in 0..n {
+        graph.push_str(&format!(
+            "[{i}:v]fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,\
+             pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p[v{i}];"
+        ));
+        joins.push_str(&format!("[v{i}]"));
+        if with_audio {
+            graph.push_str(&format!(
+                "[{i}:a]aresample={sample_rate},\
+                 aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}];"
+            ));
+            joins.push_str(&format!("[a{i}]"));
+        }
+    }
+    let (a_flag, maps): (u8, Vec<&str>) = if with_audio {
+        (1, vec!["[outv]", "[outa]"])
+    } else {
+        (0, vec!["[outv]"])
+    };
+    graph.push_str(&format!(
+        "{joins}concat=n={n}:v=1:a={a_flag}[outv]{}",
+        if with_audio { "[outa]" } else { "" }
+    ));
+
+    let mut cmd = Command::new(ffmpeg);
+    cmd.arg("-y");
+    for path in &opts.input_paths {
+        cmd.arg("-i").arg(path);
+    }
+    cmd.arg("-filter_complex").arg(&graph);
+    for label in &maps {
+        cmd.args(["-map", label]);
+    }
+    cmd.args([
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+    ]);
+    if with_audio {
+        cmd.args(["-c:a", "aac", "-b:a", "192k"]);
+    }
+    cmd.args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    run_pass(app, id, cmd, total).await
+}
+
+fn concat_list_path(path: &str) -> String {
+    path.replace('\\', "/").replace('\'', "'\\''")
+}
+
+/// Probe every clip's stream parameters in order. Errors out the whole concat
+/// if any clip can't be read.
+async fn probe_all(app: &AppHandle, paths: &[String]) -> Result<Vec<ClipParams>, String> {
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        out.push(probe_clip_params(app, path).await?);
+    }
+    Ok(out)
+}
+
+/// ffprobe one clip down to the video/audio fields the compatibility check and
+/// the normalize pass need.
+async fn probe_clip_params(app: &AppHandle, path: &str) -> Result<ClipParams, String> {
+    let ffprobe = paths::ffprobe_path(app).map_err(|e| e.to_string())?;
+    if !ffprobe.exists() {
+        return Err("ffprobe not installed".into());
+    }
+    if !Path::new(path).exists() {
+        return Err(format!("file not found: {path}"));
+    }
+
+    let mut cmd = Command::new(&ffprobe);
+    cmd.args([
+        "-v",
+        "error",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+    ])
+    .arg(path)
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    crate::ytdlp::hide_console(&mut cmd);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ffprobe: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("failed to parse ffprobe JSON: {e}"))?;
+    let empty = Vec::new();
+    let streams = json
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .unwrap_or(&empty);
+    let stream_of = |kind: &str| {
+        streams
+            .iter()
+            .find(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some(kind))
+    };
+    let video = stream_of("video");
+    let audio = stream_of("audio");
+    if video.is_none() {
+        return Err(format!("no video stream in {path}"));
+    }
+    let str_field = |s: Option<&serde_json::Value>, key: &str| {
+        s.and_then(|v| v.get(key))
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+    };
+    let u32_field = |s: Option<&serde_json::Value>, key: &str| {
+        s.and_then(|v| v.get(key)).and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|t| t.parse::<u64>().ok()))
+                .map(|n| n as u32)
+        })
+    };
+
+    Ok(ClipParams {
+        duration: json
+            .get("format")
+            .and_then(|f| f.get("duration"))
+            .and_then(|d| d.as_str())
+            .and_then(|d| d.parse::<f64>().ok()),
+        v_codec: str_field(video, "codec_name"),
+        width: u32_field(video, "width"),
+        height: u32_field(video, "height"),
+        fps: video
+            .and_then(|v| v.get("avg_frame_rate"))
+            .and_then(|r| r.as_str())
+            .and_then(parse_frame_rate),
+        pix_fmt: str_field(video, "pix_fmt"),
+        has_audio: audio.is_some(),
+        a_codec: str_field(audio, "codec_name"),
+        sample_rate: u32_field(audio, "sample_rate"),
+        channels: u32_field(audio, "channels"),
+    })
+}
+
+/// None when the clips can be stream-copied as-is; otherwise the first mismatch,
+/// phrased for the UI badge. Compares the first clip against the rest.
+fn concat_incompatibility(params: &[ClipParams]) -> Option<String> {
+    let first = params.first()?;
+    for p in &params[1..] {
+        if p.v_codec != first.v_codec {
+            return Some("different video codecs".into());
+        }
+        if p.width != first.width || p.height != first.height {
+            return Some("different resolutions".into());
+        }
+        if p.pix_fmt != first.pix_fmt {
+            return Some("different pixel formats".into());
+        }
+        match (first.fps, p.fps) {
+            (Some(a), Some(b)) if (a - b).abs() > 0.02 => {
+                return Some("different frame rates".into())
+            }
+            _ => {}
+        }
+        if p.has_audio != first.has_audio {
+            return Some("some clips have no audio".into());
+        }
+        if p.has_audio
+            && (p.a_codec != first.a_codec
+                || p.sample_rate != first.sample_rate
+                || p.channels != first.channels)
+        {
+            return Some("different audio formats".into());
+        }
+    }
+    None
+}
+
+/// Target box for the normalize pass: the largest width/height across clips, so
+/// no clip is upscaled past its source. Each clip is letterboxed into it.
+fn target_box(params: &[ClipParams]) -> (u32, u32) {
+    let w = params.iter().filter_map(|p| p.width).max().unwrap_or(1280);
+    let h = params.iter().filter_map(|p| p.height).max().unwrap_or(720);
+    // libx264 needs even dimensions.
+    (w + (w & 1), h + (h & 1))
+}
+
+/// Highest source fps (so no clip drops frames), defaulting to 30 when unknown
+/// and capped at 60 to keep the re-encode reasonable.
+fn target_fps(params: &[ClipParams]) -> f64 {
+    let max = params.iter().filter_map(|p| p.fps).fold(0.0_f64, f64::max);
+    if max <= 0.0 {
+        30.0
+    } else {
+        max.min(60.0)
+    }
+}
+
+fn target_sample_rate(params: &[ClipParams]) -> u32 {
+    params
+        .iter()
+        .filter_map(|p| p.sample_rate)
+        .max()
+        .unwrap_or(48000)
+}
+
+fn total_from_params(params: &[ClipParams]) -> Option<f64> {
+    let mut total = 0.0;
+    for p in params {
+        total += p.duration?;
+    }
+    Some(total.max(0.1))
+}
+
 fn cleanup(paths: &[String]) {
     for p in paths {
         let _ = std::fs::remove_file(p);
@@ -900,7 +1353,11 @@ fn cleanup(paths: &[String]) {
 }
 
 fn still_tracked(app: &AppHandle, id: &str) -> bool {
-    app.state::<AppState>().jobs.lock().unwrap().contains_key(id)
+    app.state::<AppState>()
+        .jobs
+        .lock()
+        .unwrap()
+        .contains_key(id)
 }
 
 fn emit_progress(app: &AppHandle, id: &str, fraction: f64) {
