@@ -1,2 +1,9 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize all text files to LF in the repo AND in the working tree, so a
+# Windows checkout doesn't keep re-flagging files as "modified" purely from
+# CRLF<->LF conversion. Binary files are still auto-detected and left alone.
+* text=auto eol=lf
+
+# Keep Windows-native scripts as CRLF so they run correctly.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
