@@ -113,6 +113,8 @@ export interface DownloadStatusEvent {
   id: string;
   status: DownloadStatusKind;
   message: string | null;
+  /** Final on-disk path; only set on the `done` status. */
+  filePath?: string | null;
 }
 
 export interface DownloadProgressEvent {

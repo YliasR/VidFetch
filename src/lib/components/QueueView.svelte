@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { openPath } from '@tauri-apps/plugin-opener';
+  import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import {
     queueStore,
     initQueue,
@@ -18,8 +18,14 @@
     type QueueItemStatus,
   } from '$lib/stores/queue';
   import { currentView } from '$lib/stores/nav';
+  import { sendToEditor } from '$lib/stores/edit';
   import { classifyError, type ErrorHint } from '$lib/errors';
   import { ipc } from '$lib/ipc';
+
+  /** Files the Edit tab can load as a source (video or GIF). */
+  const EDITABLE_EXTS = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'gif'];
+  const isEditable = (path: string | null) =>
+    !!path && EDITABLE_EXTS.includes(path.split('.').pop()?.toLowerCase() ?? '');
 
   let initialized = false;
   let logsOpen: Record<string, boolean> = {};
@@ -158,7 +164,10 @@
 
   async function openFolder(item: QueueItem) {
     try {
-      await openPath(item.options.outputDir);
+      // Reveal the downloaded file itself when we captured its path; fall back
+      // to opening the output directory.
+      if (item.filePath) await revealItemInDir(item.filePath);
+      else await openPath(item.options.outputDir);
     } catch (err) {
       console.warn('[queue] open folder failed', err);
     }
@@ -352,6 +361,9 @@
               <button class="icon-btn danger" title="Cancel" on:click={() => cancelItem(item.id)}>✕</button>
             {:else if item.status === 'done'}
               <button class="icon-btn" title="Open folder" on:click={() => openFolder(item)}>📁</button>
+              {#if isEditable(item.filePath)}
+                <button class="icon-btn" title="Send to editor" on:click={() => sendToEditor(item.filePath!)}>✂️</button>
+              {/if}
               <button class="icon-btn" title="Remove" on:click={() => removeFromQueue(item.id)}>✕</button>
             {:else}
               {#if item.status === 'canceled'}

@@ -188,6 +188,10 @@ pub enum ConflictMode {
 /// The pipe-separated prefix yt-dlp uses for our parseable progress lines.
 pub const PROGRESS_PREFIX: &str = "VFPROG";
 
+/// Prefix on the `--print` line that carries the final on-disk path, so the
+/// runner can pick it out of stdout for "open folder" / "send to editor".
+pub const FILEPATH_PREFIX: &str = "VFFILE:";
+
 /// Default yt-dlp output template — mirrors what the frontend shows as the
 /// "reset to default" value for the template editor.
 pub const DEFAULT_OUTPUT_TEMPLATE: &str = "%(title)s.%(ext)s";
@@ -352,6 +356,14 @@ pub fn build_args(opts: &DownloadOptions, ffmpeg_path: &Path) -> Vec<String> {
     args.push(format!(
         "download:{PROGRESS_PREFIX}|%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
     ));
+
+    // Print the final on-disk path (after any merge/move) on its own line so
+    // the runner can capture it. `--print` implies `--simulate`, so
+    // `--no-simulate` keeps the real download; `--progress` (set above) still
+    // streams progress despite the implied `--quiet`.
+    args.push("--no-simulate".into());
+    args.push("--print".into());
+    args.push(format!("after_move:{FILEPATH_PREFIX}%(filepath)s"));
 
     args.push("--no-warnings".into());
     // Downloads always target a single item — playlists are exploded into

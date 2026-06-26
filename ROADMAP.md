@@ -209,7 +209,7 @@ channel end-to-end with a small surface area.
 
 ## Nightly 2 — GIF pipeline (rest)
 
-- [ ] **GIF as a download format** — offer GIF in the Download view's
+- [x] **GIF as a download format** — offer GIF in the Download view's
       output options: yt-dlp fetches the video, then the existing
       two-pass GIF pipeline converts it as a post-step (reusing the
       Edit tab's trim/width/fps/dither settings). Queue progress shows
@@ -248,13 +248,13 @@ channel end-to-end with a small surface area.
 
 ## Nightly 5 — Audio ops
 
-- [ ] **Remove audio** — passthrough encode with `-an`.
-- [ ] **Replace audio** — pick a local audio file, align to video
+- [x] **Remove audio** — passthrough encode with `-an`.
+- [x] **Replace audio** — pick a local audio file, align to video
       length (trim or loop), optional fade-in/out, choose mix vs.
       replace the existing track.
-- [ ] **Extract audio** — rip the audio track out to mp3/opus/flac
-      (shares the yt-dlp audio-preset code path).
-- [ ] **Volume adjust** — simple dB slider with waveform preview.
+- [x] **Extract audio** — rip the audio track out to mp3/opus/flac
+      (`-vn` + matching encoder).
+- [x] **Volume adjust** — simple dB slider with waveform preview.
 
 ## Nightly 6 — Transforms
 

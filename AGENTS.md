@@ -86,6 +86,8 @@ notifications.ts  Desktop notification on job completion
 theme.ts          Theme persistence + fox unlock
 updates.ts        Update channel (stable/nightly) + check/install state
 ytdlp.ts          Binary presence boot check + versions
+edit.ts           pendingEditFile + sendToEditor(path): hands a finished file
+                  from Queue/History to the Edit tab (loads it in GIF mode)
 ```
 
 `src/lib/components/` (one view per sidebar item, rendered by MainPane):
@@ -97,17 +99,29 @@ Sidebar.svelte         Nav buttons (Download/Queue/Edit/History/Presets/Settings
 MainPane.svelte        View switch on $currentView
 DownloadView.svelte    URL probe, preset picker, advanced options, format
                        browser, playlist selection, add-to-queue
-QueueView.svelte       Queue rows: progress, pause/resume/cancel, groups, logs
-EditView.svelte        Edit tab shell with a GIF / Trim mode toggle. GIF mode:
-                       video/GIF → GIF (source picker via Browse or drop,
-                       trim/width/fps/dither, loop count, two-pass progress,
-                       "Append a clip" panel). Trim mode renders TrimView.
+QueueView.svelte       Queue rows: progress, pause/resume/cancel, groups, logs.
+                       Done rows: open-folder (reveals the captured filePath) +
+                       "send to editor" (sendToEditor) for video/GIF outputs
+EditView.svelte        Edit tab shell with GIF / Trim / Concat / Audio mode
+                       tabs. GIF mode: video/GIF → GIF (source picker via Browse
+                       or drop, trim/width/fps/dither, loop count, two-pass
+                       progress, "Append a clip" panel). Other modes render
+                       TrimView / ConcatView / AudioView.
 TrimView.svelte        Trim & cut: source picker, scrub-preview thumbnail strip
                        (click a frame → set a range's start/end), N ranges with
                        separate-files / join export, lossless-copy vs re-encode
                        badge driven by list_keyframes, force-re-encode toggle.
                        Reuses the edit:// events + cancel_export.
-HistoryView.svelte     Completed downloads, open-folder / re-download
+ConcatView.svelte      Multi-clip concat: add/reorder/remove local clips, thumb
+                       sequence preview, fast-copy vs re-encode badge via
+                       plan_concat, single joined output. Reuses edit:// events.
+AudioView.svelte       Audio ops on one video source: remove / replace / extract
+                       / volume sub-ops. Replace = pick audio file, replace-vs-
+                       mix + trim-vs-loop + fades. Volume = dB slider with a
+                       showwavespic waveform preview. Ops needing audio are
+                       gated on probe_media's hasAudio. Reuses edit:// events.
+HistoryView.svelte     Completed downloads, open-folder (reveals filePath) /
+                       re-download / send-to-editor
 PresetsView.svelte     Preset CRUD + archive file picker
 SettingsView.svelte    Binaries, notifications, update channel + check
 FirstRunWizard.svelte  Guided yt-dlp/ffmpeg install on first launch
@@ -122,7 +136,10 @@ PlaceholderView.svelte Stub view (kept around for new tabs)
 tauri.conf.json        App config: version (stamped by CI for nightlies),
                        updater pubkey + endpoint, bundle settings
 capabilities/*.json    Tauri 2 permission grants for the main window —
-                       update this when using a new plugin API from JS
+                       update this when using a new plugin API from JS.
+                       NB: opener:allow-open-path / allow-reveal-item-in-dir
+                       MUST carry a scope ({"path":"**"}) or every path is
+                       rejected with ForbiddenPath (silent open-folder failure)
 Cargo.toml             Rust deps (tokio, reqwest, windows/libc for
                        pause-resume, zip/xz2/tar for installer extraction)
 src/main.rs            Entry → vidfetch_lib::run()
@@ -153,7 +170,13 @@ edit.rs       Edit tab: probe_media (ffprobe JSON), export_gif (two-pass
               filter normalize + re-encode), plan_concat (dry-run the above to
               tell the UI "copy" vs "reencode" + reason), thumbnail_at
               (single-frame JPEG data URI for the scrub strip; inlined base64),
-              cancel_export.
+              remove_audio (-c copy -an), replace_audio (overlay a local audio
+              track: replace or amix, trim/pad or -stream_loop, afade in/out,
+              pinned to video length with -t), extract_audio (-vn → mp3/opus/
+              flac), adjust_volume (volume=NdB, video stream-copied),
+              audio_waveform (showwavespic PNG data URI for the volume view),
+              cancel_export. probe_media also reports hasAudio.
+              Audio ops share spawn_audio_job + finish_pass helpers.
               Events: edit://status, edit://progress, edit://log
 files.rs      read_dropped_text (size-capped URL-list reads)
 updater.rs    Channel-aware update check/install (stable vs nightly endpoint)
@@ -165,10 +188,13 @@ updater.rs    Channel-aware update check/install (stable vs nightly endpoint)
 mod.rs        hide_console() — CREATE_NO_WINDOW for all child spawns on
               Windows; use it for every Command
 args.rs       DownloadOptions → yt-dlp argv (incl. PROGRESS_PREFIX template
-              for machine-readable progress lines)
+              for machine-readable progress lines; `--no-simulate --print
+              after_move:VFFILE:%(filepath)s` to surface the final on-disk path)
 runner.rs     Spawns yt-dlp, streams download://{status,progress,log} events,
               cancel (kill by PID on Windows), pause/resume
-              (NtSuspendProcess / SIGSTOP)
+              (NtSuspendProcess / SIGSTOP). Captures the FILEPATH_PREFIX line off
+              stdout and reports it via DownloadStatus.filePath on `done`
+              (emit_done); the GIF path is reported instead for gif downloads
 installer.rs  Downloads platform-specific yt-dlp + ffmpeg static builds with
               progress events, extracts (zip/tar.xz) into bin dir
 ```

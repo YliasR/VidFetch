@@ -8,7 +8,8 @@
 
 use crate::paths;
 use crate::state::{AppState, JobHandle};
-use crate::ytdlp::args::{build_args, DownloadOptions, PROGRESS_PREFIX};
+use crate::ytdlp::args::{build_args, DownloadOptions, FILEPATH_PREFIX, PROGRESS_PREFIX};
+use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -23,6 +24,8 @@ pub struct DownloadStatus {
     pub id: String,
     pub status: &'static str,
     pub message: Option<String>,
+    /// Final on-disk path; only set on the `done` status.
+    pub file_path: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -302,18 +305,27 @@ async fn run_job(app: AppHandle, id: String, mut cmd: Command) {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    if let Some(stdout) = stdout {
+    // The `--print after_move:filepath` line lands on stdout; capture it so the
+    // frontend can offer "open folder" / "send to editor" on the final file.
+    let captured = Arc::new(Mutex::new(None::<String>));
+
+    let stdout_task = stdout.map(|stdout| {
         let app_c = app.clone();
         let id_c = id.clone();
+        let cap = captured.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(path) = line.strip_prefix(FILEPATH_PREFIX) {
+                    *cap.lock().unwrap() = Some(path.trim().to_string());
+                    continue; // bookkeeping line — keep it out of the log panel
+                }
                 handle_line(&app_c, &id_c, &line, "stdout");
             }
-        });
-    }
+        })
+    });
 
-    if let Some(stderr) = stderr {
+    let stderr_task = stderr.map(|stderr| {
         let app_c = app.clone();
         let id_c = id.clone();
         tokio::spawn(async move {
@@ -321,12 +333,22 @@ async fn run_job(app: AppHandle, id: String, mut cmd: Command) {
             while let Ok(Some(line)) = lines.next_line().await {
                 handle_line(&app_c, &id_c, &line, "stderr");
             }
-        });
+        })
+    });
+
+    let wait = child.wait().await;
+    // Drain the readers so the captured path is final before we emit `done`.
+    if let Some(task) = stdout_task {
+        let _ = task.await;
+    }
+    if let Some(task) = stderr_task {
+        let _ = task.await;
     }
 
-    match child.wait().await {
+    match wait {
         Ok(status) if status.success() => {
-            emit_status(&app, &id, "done", None);
+            let path = captured.lock().unwrap().take();
+            emit_done(&app, &id, path);
         }
         Ok(status) => {
             emit_status(
@@ -375,15 +397,17 @@ async fn run_gif_job(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    // Track if we should continue with GIF conversion
-    let mut should_convert = true;
-
     if let Some(stdout) = stdout {
         let app_c = app.clone();
         let id_c = id.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                // The yt-dlp `--print` path is the intermediate mp4; the GIF
+                // path is what we report on `done`, so drop this line.
+                if line.starts_with(FILEPATH_PREFIX) {
+                    continue;
+                }
                 handle_line(&app_c, &id_c, &line, "stdout");
             }
         });
@@ -405,11 +429,15 @@ async fn run_gif_job(
         Ok(status) if status.success() => {
             // yt-dlp succeeded, now convert to GIF
             emit_status(&app, &id, "postprocess", None);
-            
-            // Find the downloaded file and convert it
-            if let Err(e) = convert_to_gif(&app, &id, &opts, &ffmpeg_path).await {
-                emit_status(&app, &id, "error", Some(format!("GIF conversion failed: {e}")));
-                should_convert = false;
+
+            // Find the downloaded file and convert it; report the GIF path.
+            match convert_to_gif(&app, &id, &opts, &ffmpeg_path).await {
+                Ok(gif_path) => {
+                    emit_done(&app, &id, Some(gif_path.to_string_lossy().into_owned()));
+                }
+                Err(e) => {
+                    emit_status(&app, &id, "error", Some(format!("GIF conversion failed: {e}")));
+                }
             }
         }
         Ok(status) => {
@@ -419,16 +447,10 @@ async fn run_gif_job(
                 "error",
                 Some(format!("yt-dlp exited with {status}")),
             );
-            should_convert = false;
         }
         Err(e) => {
             emit_status(&app, &id, "error", Some(format!("wait failed: {e}")));
-            should_convert = false;
         }
-    }
-
-    if should_convert {
-        emit_status(&app, &id, "done", None);
     }
 
     // Remove the job from state once the task is done (unless cancel got there first).
@@ -442,7 +464,7 @@ async fn convert_to_gif(
     id: &str,
     opts: &DownloadOptions,
     ffmpeg_path: &PathBuf,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PathBuf> {
     // Parse the output template to figure out the downloaded filename
     // yt-dlp uses the template we provided, so we need to figure out what file was created
     let output_dir = Path::new(&opts.output_dir);
@@ -592,8 +614,8 @@ async fn convert_to_gif(
     
     // Clean up the original mp4 file
     let _ = std::fs::remove_file(&input_path);
-    
-    Ok(())
+
+    Ok(gif_path)
 }
 
 /// Compute the duration of the clip to be encoded for progress tracking.
@@ -733,6 +755,21 @@ fn emit_status(app: &AppHandle, id: &str, status: &'static str, message: Option<
             id: id.to_string(),
             status,
             message,
+            file_path: None,
+        },
+    );
+}
+
+/// Emit the terminal `done` status, carrying the final on-disk file path when
+/// we managed to capture it.
+fn emit_done(app: &AppHandle, id: &str, file_path: Option<String>) {
+    let _ = app.emit(
+        "download://status",
+        DownloadStatus {
+            id: id.to_string(),
+            status: "done",
+            message: None,
+            file_path,
         },
     );
 }

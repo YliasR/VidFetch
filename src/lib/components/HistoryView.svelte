@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { openPath } from '@tauri-apps/plugin-opener';
+  import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
   import {
     historyStore,
     initHistory,
@@ -9,7 +9,13 @@
     type HistoryEntry,
   } from '$lib/stores/history';
   import { addToQueue } from '$lib/stores/queue';
+  import { sendToEditor } from '$lib/stores/edit';
   import { currentView } from '$lib/stores/nav';
+
+  /** GIFs/audio-only files can't be re-edited as video sources in the GIF tab. */
+  const EDITABLE_EXTS = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'gif'];
+  const isEditable = (path: string | null) =>
+    !!path && EDITABLE_EXTS.includes(path.split('.').pop()?.toLowerCase() ?? '');
 
   onMount(initHistory);
 
@@ -40,7 +46,10 @@
 
   async function openFolder(entry: HistoryEntry) {
     try {
-      await openPath(entry.outputDir);
+      // Reveal (and highlight) the file itself when we know it; otherwise just
+      // open the output directory.
+      if (entry.filePath) await revealItemInDir(entry.filePath);
+      else await openPath(entry.outputDir);
     } catch (err) {
       console.warn('[history] open folder failed', err);
     }
@@ -118,6 +127,9 @@
 
           <div class="actions">
             <button class="icon-btn" title="Open folder" on:click={() => openFolder(entry)}>📁</button>
+            {#if isEditable(entry.filePath)}
+              <button class="icon-btn" title="Send to editor" on:click={() => sendToEditor(entry.filePath!)}>✂️</button>
+            {/if}
             <button class="icon-btn" title="Re-download" on:click={() => reDownload(entry)}>↻</button>
             <button class="icon-btn danger" title="Remove from history" on:click={() => removeHistoryEntry(entry.id)}>✕</button>
           </div>

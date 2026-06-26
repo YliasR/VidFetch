@@ -5,11 +5,13 @@
   import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
   import { openPath } from '@tauri-apps/plugin-opener';
   import { ipc, type MediaInfo, type GifDither, type GifAppendPosition } from '$lib/ipc';
+  import { pendingEditFile } from '$lib/stores/edit';
   import ConcatView from './ConcatView.svelte';
   import TrimView from './TrimView.svelte';
+  import AudioView from './AudioView.svelte';
 
-  /** Edit tab sub-modes: video→GIF studio, trim & cut, and multi-clip concat. */
-  type EditMode = 'gif' | 'trim' | 'concat';
+  /** Edit tab sub-modes: video→GIF studio, trim & cut, multi-clip concat, audio ops. */
+  type EditMode = 'gif' | 'trim' | 'concat' | 'audio';
   let mode: EditMode = 'gif';
 
   /** Extensions the Edit tab will load as a source clip (video or GIF). */
@@ -52,6 +54,18 @@
   ];
 
   let unlisteners: UnlistenFn[] = [];
+  let unsubPending: (() => void) | null = null;
+
+  // A file handed over from the Queue / History "Edit" action loads straight
+  // into the GIF studio as the source clip, then clears the pending slot.
+  onMount(() => {
+    unsubPending = pendingEditFile.subscribe((path) => {
+      if (!path) return;
+      mode = 'gif';
+      void loadSource(path);
+      pendingEditFile.set(null);
+    });
+  });
 
   onMount(async () => {
     unlisteners = await Promise.all([
@@ -90,6 +104,7 @@
 
   onDestroy(() => {
     for (const unlisten of unlisteners) unlisten();
+    unsubPending?.();
   });
 
   async function pickSource() {
@@ -287,8 +302,11 @@
       {:else if mode === 'trim'}
         Cut a range out of a video — lossless when the start lands on a keyframe, re-encoded
         otherwise. Drop a video anywhere on this tab to load it.
-      {:else}
+      {:else if mode === 'concat'}
         Arrange local clips into a sequence, preview the order, and write one joined output.
+      {:else}
+        Remove, replace, extract, or re-level a video's audio. Drop a video anywhere on this tab to
+        load it.
       {/if}
     </p>
     <div class="modes" role="tablist">
@@ -319,6 +337,15 @@
       >
         Concat
       </button>
+      <button
+        class="mode-tab"
+        class:active={mode === 'audio'}
+        role="tab"
+        aria-selected={mode === 'audio'}
+        on:click={() => (mode = 'audio')}
+      >
+        Audio
+      </button>
     </div>
   </header>
 
@@ -326,6 +353,8 @@
     <TrimView />
   {:else if mode === 'concat'}
     <ConcatView />
+  {:else if mode === 'audio'}
+    <AudioView />
   {:else}
   <div class="card">
     <div class="label">Source</div>

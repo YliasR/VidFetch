@@ -16,9 +16,15 @@
     "shell:default",
     "shell:allow-open",
     "opener:default",
-    "opener:allow-open-path",
     "opener:allow-open-url",
-    "opener:allow-reveal-item-in-dir",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }, { "path": "$HOME/**" }]
+    },
+    {
+      "identifier": "opener:allow-reveal-item-in-dir",
+      "allow": [{ "path": "**" }, { "path": "$HOME/**" }]
+    },
     "store:default",
     "notification:default",
     "updater:default",

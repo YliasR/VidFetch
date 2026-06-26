@@ -32,6 +32,8 @@ export interface MediaInfo {
   width: number | null;
   height: number | null;
   fps: number | null;
+  /** Whether the file has at least one audio stream. */
+  hasAudio: boolean;
 }
 
 export type GifDither = 'sierra2_4a' | 'floyd_steinberg' | 'bayer' | 'none';
@@ -99,6 +101,40 @@ export interface ConcatPlan {
   reason: string | null;
 }
 
+export interface RemoveAudioOptions {
+  inputPath: string;
+  outputPath: string;
+}
+
+export type ReplaceAudioMode = 'replace' | 'mix';
+export type ReplaceAudioAlign = 'trim' | 'loop';
+
+export interface ReplaceAudioOptions {
+  inputPath: string;
+  audioPath: string;
+  outputPath: string;
+  mode: ReplaceAudioMode;
+  align: ReplaceAudioAlign;
+  /** Fade-in / fade-out length in seconds; 0 = none. */
+  fadeIn: number;
+  fadeOut: number;
+}
+
+export type AudioFormat = 'mp3' | 'opus' | 'flac';
+
+export interface ExtractAudioOptions {
+  inputPath: string;
+  outputPath: string;
+  format: AudioFormat;
+}
+
+export interface VolumeOptions {
+  inputPath: string;
+  outputPath: string;
+  /** Gain in dB; negative quietens, positive boosts. */
+  gainDb: number;
+}
+
 export const ipc = {
   checkBinaries: () => invoke<BinariesStatus>('check_binaries'),
   installYtdlp: () => invoke<string>('install_ytdlp'),
@@ -125,6 +161,16 @@ export const ipc = {
     invoke<string>('concat_clips', { options }),
   planConcat: (inputPaths: string[]) =>
     invoke<ConcatPlan>('plan_concat', { inputPaths }),
+  removeAudio: (options: RemoveAudioOptions) =>
+    invoke<string>('remove_audio', { options }),
+  replaceAudio: (options: ReplaceAudioOptions) =>
+    invoke<string>('replace_audio', { options }),
+  extractAudio: (options: ExtractAudioOptions) =>
+    invoke<string>('extract_audio', { options }),
+  adjustVolume: (options: VolumeOptions) =>
+    invoke<string>('adjust_volume', { options }),
+  audioWaveform: (path: string, width?: number, height?: number) =>
+    invoke<string>('audio_waveform', { path, width: width ?? null, height: height ?? null }),
   cancelExport: (id: string) => invoke<boolean>('cancel_export', { id }),
 
   checkAppUpdate: (channel: string) =>

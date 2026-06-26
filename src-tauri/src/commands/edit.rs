@@ -26,6 +26,10 @@ pub struct MediaInfo {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<f64>,
+    /// Whether the file carries at least one audio stream. The Audio view uses
+    /// this to enable/disable ops (remove/extract/volume need audio; "mix"
+    /// needs the source to already have a track to mix into).
+    pub has_audio: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -108,6 +112,48 @@ pub struct MultiTrimOptions {
 pub struct ConcatClipsOptions {
     pub input_paths: Vec<String>,
     pub output_path: String,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveAudioOptions {
+    pub input_path: String,
+    pub output_path: String,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceAudioOptions {
+    pub input_path: String,
+    /// Local audio (or video) file whose audio track is laid over the video.
+    pub audio_path: String,
+    pub output_path: String,
+    /// "replace" swaps the video's audio for the new track; "mix" blends the
+    /// new track with the existing one (requires the source to have audio).
+    pub mode: String,
+    /// "trim" pads/cuts the new audio to the video length; "loop" repeats it.
+    pub align: String,
+    /// Fade-in / fade-out length in seconds; 0 = none.
+    pub fade_in: f64,
+    pub fade_out: f64,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractAudioOptions {
+    pub input_path: String,
+    pub output_path: String,
+    /// "mp3", "opus", or "flac".
+    pub format: String,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeOptions {
+    pub input_path: String,
+    pub output_path: String,
+    /// Gain in decibels (negative quietens, positive boosts).
+    pub gain_db: f64,
 }
 
 /// What `concat_clips` will do with the current clip set, surfaced to the UI so
@@ -227,6 +273,15 @@ pub async fn probe_media(app: AppHandle, path: String) -> Result<MediaInfo, Stri
         .and_then(|r| r.as_str())
         .and_then(parse_frame_rate);
 
+    let has_audio = json
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .map(|arr| {
+            arr.iter()
+                .any(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some("audio"))
+        })
+        .unwrap_or(false);
+
     if video.is_none() {
         return Err("no video stream found in file".into());
     }
@@ -237,6 +292,7 @@ pub async fn probe_media(app: AppHandle, path: String) -> Result<MediaInfo, Stri
         width,
         height,
         fps,
+        has_audio,
     })
 }
 
@@ -666,6 +722,308 @@ pub async fn append_to_gif(app: AppHandle, options: GifAppendOptions) -> Result<
 
     emit_status(&app, &id, "queued", None);
     Ok(id)
+}
+
+/// Strip the audio track, copying the video as-is (`-c copy -an`) so it is
+/// lossless and near-instant. Returns a job id; progress via `edit://*`.
+#[tauri::command]
+pub async fn remove_audio(app: AppHandle, options: RemoveAudioOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    spawn_audio_job(app, move |app, id| {
+        Box::pin(run_remove_audio(app, id, ffmpeg, options))
+    })
+    .await
+}
+
+/// Lay a local audio file over the video — replacing or mixing with the
+/// existing track, aligned to the video length, with optional fades.
+#[tauri::command]
+pub async fn replace_audio(app: AppHandle, options: ReplaceAudioOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    if !Path::new(&options.audio_path).exists() {
+        return Err(format!("file not found: {}", options.audio_path));
+    }
+    if options.mode != "replace" && options.mode != "mix" {
+        return Err("mode must be 'replace' or 'mix'".into());
+    }
+    if options.align != "trim" && options.align != "loop" {
+        return Err("align must be 'trim' or 'loop'".into());
+    }
+    if options.fade_in < 0.0 || options.fade_out < 0.0 {
+        return Err("fade lengths must be positive".into());
+    }
+    spawn_audio_job(app, move |app, id| {
+        Box::pin(run_replace_audio(app, id, ffmpeg, options))
+    })
+    .await
+}
+
+/// Rip the audio track out to mp3/opus/flac (`-vn` + the matching encoder).
+#[tauri::command]
+pub async fn extract_audio(app: AppHandle, options: ExtractAudioOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    if !["mp3", "opus", "flac"].contains(&options.format.as_str()) {
+        return Err("format must be 'mp3', 'opus', or 'flac'".into());
+    }
+    spawn_audio_job(app, move |app, id| {
+        Box::pin(run_extract_audio(app, id, ffmpeg, options))
+    })
+    .await
+}
+
+/// Adjust the audio level by a dB gain, copying the video stream untouched.
+#[tauri::command]
+pub async fn adjust_volume(app: AppHandle, options: VolumeOptions) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&options.input_path).exists() {
+        return Err(format!("file not found: {}", options.input_path));
+    }
+    if !(-60.0..=30.0).contains(&options.gain_db) {
+        return Err("gain must be between -60 and +30 dB".into());
+    }
+    spawn_audio_job(app, move |app, id| {
+        Box::pin(run_adjust_volume(app, id, ffmpeg, options))
+    })
+    .await
+}
+
+/// Render a waveform overview image (`showwavespic`) for the file's audio and
+/// return it as a PNG data URI. The Audio view shows it under the volume
+/// slider so the user can see how loud the track already is.
+#[tauri::command]
+pub async fn audio_waveform(
+    app: AppHandle,
+    path: String,
+    width: Option<u32>,
+    height: Option<u32>,
+) -> Result<String, String> {
+    let ffmpeg = paths::ffmpeg_path(&app).map_err(|e| e.to_string())?;
+    if !ffmpeg.exists() {
+        return Err("ffmpeg not installed".into());
+    }
+    if !Path::new(&path).exists() {
+        return Err(format!("file not found: {path}"));
+    }
+    let w = width.unwrap_or(640).clamp(64, 2048);
+    let h = height.unwrap_or(120).clamp(24, 512);
+
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.args(["-v", "error"])
+        .arg("-i")
+        .arg(&path)
+        .arg("-filter_complex")
+        // split=channels keeps a single combined trace; the accent-ish blue
+        // reads on both the light and dark themes over a surface background.
+        .arg(format!(
+            "showwavespic=s={w}x{h}:split_channels=0:colors=0x6ea8fe"
+        ))
+        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::ytdlp::hide_console(&mut cmd);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn ffmpeg: {e}"))?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!(
+            "could not render waveform: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(format!(
+        "data:image/png;base64,{}",
+        base64_encode(&output.stdout)
+    ))
+}
+
+/// Shared boilerplate for the audio ops: mint an id, spawn the worker, track
+/// the job handle, and emit the initial `queued` status. The worker future is
+/// produced by `make_task` so each op only writes its own ffmpeg logic.
+async fn spawn_audio_job<F>(app: AppHandle, make_task: F) -> Result<String, String>
+where
+    F: FnOnce(
+        AppHandle,
+        String,
+    )
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+{
+    let id = Uuid::new_v4().to_string();
+    let task = tokio::spawn(make_task(app.clone(), id.clone()));
+
+    let state = app.state::<AppState>();
+    state.jobs.lock().unwrap().insert(
+        id.clone(),
+        JobHandle {
+            task,
+            child_id: None,
+            paused: false,
+        },
+    );
+
+    emit_status(&app, &id, "queued", None);
+    Ok(id)
+}
+
+/// Wrap an ffmpeg pass result into the standard done/error finish, skipping the
+/// error emit when the job was canceled (which already cleaned itself up).
+fn finish_pass(app: &AppHandle, id: &str, output: &str, result: anyhow::Result<()>, what: &str) {
+    match result {
+        Ok(()) => finish(app, id, "done", Some(output.to_string())),
+        Err(e) => {
+            if still_tracked(app, id) {
+                finish(app, id, "error", Some(format!("{what} failed: {e}")));
+            }
+        }
+    }
+}
+
+async fn run_remove_audio(app: AppHandle, id: String, ffmpeg: PathBuf, opts: RemoveAudioOptions) {
+    emit_status(&app, &id, "encoding", None);
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y")
+        .arg("-i")
+        .arg(&opts.input_path)
+        .args(["-c", "copy", "-an"])
+        .args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    let total = media_duration(&app, &opts.input_path).await;
+    let result = run_pass(&app, &id, cmd, total).await;
+    finish_pass(&app, &id, &opts.output_path, result, "remove audio");
+}
+
+async fn run_extract_audio(app: AppHandle, id: String, ffmpeg: PathBuf, opts: ExtractAudioOptions) {
+    emit_status(&app, &id, "encoding", None);
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y").arg("-i").arg(&opts.input_path).arg("-vn");
+    match opts.format.as_str() {
+        "mp3" => cmd.args(["-c:a", "libmp3lame", "-q:a", "2"]),
+        "opus" => cmd.args(["-c:a", "libopus", "-b:a", "160k"]),
+        _ => cmd.args(["-c:a", "flac"]),
+    };
+    cmd.args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    let total = media_duration(&app, &opts.input_path).await;
+    let result = run_pass(&app, &id, cmd, total).await;
+    finish_pass(&app, &id, &opts.output_path, result, "extract audio");
+}
+
+async fn run_adjust_volume(app: AppHandle, id: String, ffmpeg: PathBuf, opts: VolumeOptions) {
+    emit_status(&app, &id, "encoding", None);
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y")
+        .arg("-i")
+        .arg(&opts.input_path)
+        .arg("-af")
+        .arg(format!("volume={}dB", opts.gain_db))
+        .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"])
+        .args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+    let total = media_duration(&app, &opts.input_path).await;
+    let result = run_pass(&app, &id, cmd, total).await;
+    finish_pass(&app, &id, &opts.output_path, result, "volume adjust");
+}
+
+async fn run_replace_audio(app: AppHandle, id: String, ffmpeg: PathBuf, opts: ReplaceAudioOptions) {
+    // The video length is the target: the new audio is trimmed/looped/padded to
+    // it, and it drives both the fade-out start and the encode progress bar.
+    let vdur = media_duration(&app, &opts.input_path).await;
+
+    emit_status(&app, &id, "encoding", None);
+    let looping = opts.align == "loop";
+
+    // Build the new-audio filter chain on [1:a].
+    let mut chain = String::from("[1:a]");
+    // Trim mode pads short audio with silence so the track always reaches the
+    // video end; loop mode is already endless via -stream_loop, cut by -t.
+    if !looping {
+        chain.push_str("apad,");
+    }
+    if opts.fade_in > 0.0 {
+        chain.push_str(&format!("afade=t=in:st=0:d={},", opts.fade_in));
+    }
+    if opts.fade_out > 0.0 {
+        if let Some(d) = vdur {
+            let st = (d - opts.fade_out).max(0.0);
+            chain.push_str(&format!("afade=t=out:st={st}:d={},", opts.fade_out));
+        }
+    }
+    // Drop the trailing comma left by the last filter (or the "[1:a]" prefix
+    // when no filters were added).
+    let chain = chain.trim_end_matches(',').to_string();
+    let has_filters = chain != "[1:a]";
+
+    let mut cmd = Command::new(&ffmpeg);
+    cmd.arg("-y").arg("-i").arg(&opts.input_path);
+    if looping {
+        cmd.args(["-stream_loop", "-1"]);
+    }
+    cmd.arg("-i").arg(&opts.audio_path);
+
+    if opts.mode == "mix" {
+        // Blend the prepared new track with the source's own audio. normalize=0
+        // keeps each input at its original level instead of attenuating both.
+        let prepared = if has_filters {
+            format!("{chain}[na];")
+        } else {
+            String::new()
+        };
+        let new_label = if has_filters { "[na]" } else { "[1:a]" };
+        let graph = format!(
+            "{prepared}[0:a]{new_label}amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        );
+        cmd.arg("-filter_complex")
+            .arg(graph)
+            .args(["-map", "0:v", "-map", "[aout]"]);
+    } else if has_filters {
+        cmd.arg("-filter_complex")
+            .arg(format!("{chain}[aout]"))
+            .args(["-map", "0:v", "-map", "[aout]"]);
+    } else {
+        cmd.args(["-map", "0:v", "-map", "1:a"]);
+    }
+
+    cmd.args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]);
+    // Pin the output to the video length. With looping/padding the audio is
+    // endless, so -t is what actually stops the encode; -shortest is the
+    // fallback when the duration probe failed.
+    match vdur {
+        Some(d) => {
+            cmd.args(["-t", &format!("{d}")]);
+        }
+        None => {
+            cmd.arg("-shortest");
+        }
+    }
+    cmd.args(["-progress", "pipe:1", "-nostats"])
+        .arg(&opts.output_path);
+
+    let result = run_pass(&app, &id, cmd, vdur).await;
+    finish_pass(&app, &id, &opts.output_path, result, "replace audio");
 }
 
 async fn run_export(app: AppHandle, id: String, ffmpeg: PathBuf, opts: GifExportOptions) {

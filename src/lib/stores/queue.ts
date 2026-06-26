@@ -55,6 +55,8 @@ export interface QueueItem {
   message: string | null;
   addedAt: number;
   group: QueueItemGroup | null;
+  /** Final on-disk path once done — drives "open folder" / "send to editor". */
+  filePath: string | null;
 }
 
 interface QueueState {
@@ -118,7 +120,7 @@ async function loadQueue(): Promise<void> {
     if (!saved || !Array.isArray(saved.items)) return;
     // Anything that was in flight died with the previous process: requeue it.
     const items: QueueItem[] = saved.items.map((i) => {
-      const base = { ...i, rustId: null, group: i.group ?? null };
+      const base = { ...i, rustId: null, group: i.group ?? null, filePath: i.filePath ?? null };
       const terminal = i.status === 'done' || i.status === 'error' || i.status === 'canceled';
       return terminal
         ? base
@@ -172,6 +174,7 @@ export async function initQueue(): Promise<void> {
           ...item,
           status: mapStatus(payload.status),
           message: payload.message ?? item.message,
+          filePath: payload.filePath ?? item.filePath,
         };
         if (next.status !== item.status) changed = true;
         if (next.status === 'done' && item.status !== 'done') completed = next;
@@ -238,6 +241,7 @@ async function recordCompletion(item: QueueItem): Promise<void> {
       preset: item.options.preset,
       outputFormat: item.options.outputFormat ?? null,
       sizeBytes: item.total ?? item.downloaded ?? null,
+      filePath: item.filePath ?? null,
       options: item.options,
     });
   } catch (err) {
@@ -280,6 +284,7 @@ export function addToQueue(params: {
     message: null,
     addedAt: Date.now(),
     group: params.group ?? null,
+    filePath: null,
   };
   queueStore.update((s) => ({ ...s, items: [...s.items, item] }));
   void saveQueue();

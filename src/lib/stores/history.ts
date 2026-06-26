@@ -12,6 +12,8 @@ export interface HistoryEntry {
   preset: string;
   outputFormat: string | null;
   sizeBytes: number | null;
+  /** Final on-disk path; null for entries saved before this was tracked. */
+  filePath: string | null;
   completedAt: number;
   options: DownloadOptions;
 }
